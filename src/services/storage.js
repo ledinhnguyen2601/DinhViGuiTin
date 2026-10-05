@@ -159,7 +159,17 @@ export const StorageService = {
     try {
       const data = await safeStorage.get(STORAGE_KEYS.SECRETS);
       if (!data) return { ...DEFAULT_SECRETS };
-      return validateSecrets(JSON.parse(data));
+      const validated = validateSecrets(JSON.parse(data));
+      if (!validated.telegramBotToken && DEFAULT_SECRETS.telegramBotToken) {
+        validated.telegramBotToken = DEFAULT_SECRETS.telegramBotToken;
+      }
+      if (!validated.telegramChatId && DEFAULT_SECRETS.telegramChatId) {
+        validated.telegramChatId = DEFAULT_SECRETS.telegramChatId;
+      }
+      if (!validated.discordWebhookUrl && DEFAULT_SECRETS.discordWebhookUrl) {
+        validated.discordWebhookUrl = DEFAULT_SECRETS.discordWebhookUrl;
+      }
+      return validated;
     } catch {
       return { ...DEFAULT_SECRETS };
     }

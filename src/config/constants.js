@@ -27,9 +27,9 @@ export const DEFAULT_SETTINGS = {
 };
 
 export const DEFAULT_SECRETS = {
-  telegramBotToken: '',
-  telegramChatId: '',
-  discordWebhookUrl: '',
+  telegramBotToken: (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_TELEGRAM_BOT_TOKEN) || '',
+  telegramChatId: (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_TELEGRAM_CHAT_ID) || '',
+  discordWebhookUrl: (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_DISCORD_WEBHOOK_URL) || '',
   backupPhone1: '',
   backupPhone2: '',
 };
