@@ -19,7 +19,8 @@ export const NotifierService = {
     if (!settings.sendStartMessage) return;
 
     const distStr = formatDistance(distanceMeters);
-    const etaStr = etaMinutes ? String(etaMinutes) : '—';
+    const initialEta = etaMinutes || (distanceMeters > 0 ? Math.max(1, Math.round(((distanceMeters * (settings.roadFactor || 1.3)) / 1000) / 25 * 60)) : null);
+    const etaStr = initialEta ? String(initialEta) : '—';
     const text = MESSAGE_TEMPLATES.START(
       settings.travelerName,
       settings.destinationName,

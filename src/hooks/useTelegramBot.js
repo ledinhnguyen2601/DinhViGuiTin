@@ -13,7 +13,7 @@ export function useTelegramBot(tracker) {
   useEffect(() => {
     // Only poll if Telegram is configured and app is tracking (or idle, depends on user preference, 
     // but usually we want to allow query anytime as long as app is open. Let's poll anytime it's configured).
-    if (!secrets.telegramBotToken || !secrets.telegramChatId) {
+    if (!secrets.telegramBotToken) {
       return;
     }
 
@@ -39,22 +39,28 @@ export function useTelegramBot(tracker) {
             const message = update.message || update.channel_post;
             if (!message || !message.text) continue;
 
-            // Only respond to specific chats to avoid spam
-            if (String(message.chat.id) !== String(secrets.telegramChatId)) {
-                continue;
+            const senderChatId = String(message.chat.id);
+            const isTargetChat = !secrets.telegramChatId || senderChatId === String(secrets.telegramChatId) || message.chat.type === 'private';
+            if (!isTargetChat) {
+              continue;
             }
 
             const text = message.text.trim().toLowerCase();
             
-            // Lệnh có thể là "/vitri", "/vitri Hieu", "/where Lan"
-            // Tách lệnh và tham số (tên)
+            // Lệnh có thể là "/vitri", "/vitri Hieu", "/where Lan", "vitri", "where"
             const parts = text.split(' ').filter(Boolean);
             const cmd = parts[0];
             const nameParam = parts.slice(1).join(' ').toLowerCase();
 
             // Nếu đây là lệnh vị trí
-            if (cmd === '/vitri' || cmd === '/where' || cmd.startsWith('/vitri@') || cmd.startsWith('/where@')) {
-              
+            if (
+              cmd === '/vitri' || 
+              cmd === '/where' || 
+              cmd === 'vitri' || 
+              cmd === 'where' || 
+              cmd.startsWith('/vitri@') || 
+              cmd.startsWith('/where@')
+            ) {
               // Nếu có truyền tên, kiểm tra xem tên có khớp với thiết bị này không
               if (nameParam) {
                 const myName = (settings.travelerName || '').toLowerCase();
@@ -64,8 +70,8 @@ export function useTelegramBot(tracker) {
                 }
               }
 
-              // Nếu không truyền tên hoặc tên khớp -> gửi vị trí
-              await handleLocationQuery();
+              // Gửi vị trí về chính chat đã hỏi
+              await handleLocationQuery(senderChatId);
             }
           }
         }
@@ -88,7 +94,10 @@ export function useTelegramBot(tracker) {
     };
   }, [secrets.telegramBotToken, secrets.telegramChatId, settings.travelerName, settings.destinationName, metrics.lastUpdated]);
 
-  const handleLocationQuery = async () => {
+  const handleLocationQuery = async (targetChatId) => {
+    const replyChatId = targetChatId || secrets.telegramChatId;
+    if (!replyChatId) return;
+
     try {
       // Get fresh location if possible, otherwise use last known
       let pos;
@@ -134,9 +143,6 @@ export function useTelegramBot(tracker) {
       const traveler = settings.travelerName || 'Người đi';
       const mapLink = `https://www.google.com/maps?q=${pos.lat},${pos.lng}`;
       
-      let durationInfo = "";
-      // If tracking, how long have they been tracking? If idle, how long have they been here?
-      // For simplicity, we just send current time and speed
       const speed = Math.round(metrics.speedKmh || 0);
       const timeStr = new Date().toLocaleTimeString('vi-VN');
 
@@ -150,9 +156,9 @@ export function useTelegramBot(tracker) {
       reply += `Pin: ${batteryInfo} | Mạng: ${networkInfo}\n\n`;
       reply += `<a href="${mapLink}">🗺️ Xem trên Google Maps</a>`;
 
-      await TelegramService.sendMessage(secrets.telegramBotToken, secrets.telegramChatId, reply);
+      await TelegramService.sendMessage(secrets.telegramBotToken, replyChatId, reply);
     } catch (err) {
-      await TelegramService.sendMessage(secrets.telegramBotToken, secrets.telegramChatId, `⚠️ Không thể lấy vị trí hiện tại: ${err.message}`);
+      await TelegramService.sendMessage(secrets.telegramBotToken, replyChatId, `⚠️ Không thể lấy vị trí hiện tại: ${err.message}`);
     }
   };
 }

@@ -139,7 +139,7 @@ export class TripMachine {
    * @returns {{ arrived: boolean, filterChanged: boolean, newFilter?: number }}
    */
   async handleGpsUpdate(rawSample) {
-    if (this.state !== TRIP_STATES.TRACKING) {
+    if (this.state !== TRIP_STATES.TRACKING && this.state !== TRIP_STATES.STARTING) {
       return { arrived: false, filterChanged: false };
     }
 
