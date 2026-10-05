@@ -22,12 +22,15 @@ const safeStorage = {
       const { value } = await Preferences.get({ key });
       if (value !== null && value !== undefined) return value;
     } catch {}
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        const val = window.localStorage.getItem(key);
-        if (val !== null && val !== undefined) return val;
-      }
-    } catch {}
+    // C.7: Bot Token và secrets tuyệt đối không đọc từ localStorage
+    if (key !== STORAGE_KEYS.SECRETS) {
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          const val = window.localStorage.getItem(key);
+          if (val !== null && val !== undefined) return val;
+        }
+      } catch {}
+    }
     return memStore.has(key) ? memStore.get(key) : null;
   },
 
@@ -35,11 +38,21 @@ const safeStorage = {
     try {
       await Preferences.set({ key, value });
     } catch {}
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(key, value);
-      }
-    } catch {}
+    // C.7: Bot Token và secrets tuyệt đối KHÔNG được ghi vào localStorage
+    if (key !== STORAGE_KEYS.SECRETS) {
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(key, value);
+        }
+      } catch {}
+    } else {
+      // Đảm bảo xóa sạch nếu từng vô tình lưu trong localStorage
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.removeItem(STORAGE_KEYS.SECRETS);
+        }
+      } catch {}
+    }
     memStore.set(key, String(value));
   },
 
@@ -65,7 +78,7 @@ const safeStorage = {
       }
     } catch {}
     memStore.clear();
-  }
+  },
 };
 
 /**
@@ -75,11 +88,11 @@ export function validateSettings(raw) {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS };
 
   return {
-    travelerName: (typeof raw.travelerName === 'string' && raw.travelerName.trim()) 
-      ? raw.travelerName.trim().slice(0, 30) 
+    travelerName: typeof raw.travelerName === 'string'
+      ? raw.travelerName.trim().slice(0, 30)
       : DEFAULT_SETTINGS.travelerName,
-    destinationName: (typeof raw.destinationName === 'string' && raw.destinationName.trim()) 
-      ? raw.destinationName.trim().slice(0, 50) 
+    destinationName: typeof raw.destinationName === 'string'
+      ? raw.destinationName.trim().slice(0, 50)
       : DEFAULT_SETTINGS.destinationName,
     destinationLat: (typeof raw.destinationLat === 'number' && !isNaN(raw.destinationLat) && raw.destinationLat >= -90 && raw.destinationLat <= 90)
       ? raw.destinationLat
@@ -93,8 +106,8 @@ export function validateSettings(raw) {
     roadFactor: (typeof raw.roadFactor === 'number' && raw.roadFactor >= 1.0 && raw.roadFactor <= 2.0)
       ? raw.roadFactor
       : DEFAULT_SETTINGS.roadFactor,
-    sendMode: ['telegram_only', 'telegram_with_sms_fallback', 'sms_only'].includes(raw.sendMode)
-      ? raw.sendMode
+    sendMode: ['telegram_only', 'telegram_with_sms_fallback', 'sms_only', 'discord'].includes(raw.sendMode || raw.chedoGui)
+      ? (raw.sendMode || raw.chedoGui)
       : DEFAULT_SETTINGS.sendMode,
     sendStartMessage: typeof raw.sendStartMessage === 'boolean'
       ? raw.sendStartMessage
@@ -119,6 +132,7 @@ export function validateSecrets(raw) {
     telegramChatId: typeof raw.telegramChatId === 'string' || typeof raw.telegramChatId === 'number'
       ? String(raw.telegramChatId).trim()
       : '',
+    discordWebhookUrl: typeof raw.discordWebhookUrl === 'string' ? raw.discordWebhookUrl.trim() : '',
     backupPhone1: typeof raw.backupPhone1 === 'string' ? raw.backupPhone1.trim().replace(/[^0-9+]/g, '') : '',
     backupPhone2: typeof raw.backupPhone2 === 'string' ? raw.backupPhone2.trim().replace(/[^0-9+]/g, '') : '',
   };
@@ -214,17 +228,28 @@ export const StorageService = {
     try {
       const logs = await this.getLogs();
       
-      // Token redaction filter
-      let sanitizedMessage = String(message || '');
-      // Redact bot token pattern (e.g. 123456789:ABCdef...)
-      sanitizedMessage = sanitizedMessage.replace(/\d{8,12}:[A-Za-z0-9_-]{30,45}/g, '[REDACTED_TOKEN]');
+      // Token and Discord webhook redaction filter (C.7: tuyệt đối không log token/webhook)
+      const DISCORD_WEBHOOK_REGEX = /(?:https?:(?:\/|\\\/)(?:\/|\\\/))?(?:[a-zA-Z0-9-]+\.)?discord(?:app)?\.com(?:\/|\\\/)api(?:\/|\\\/)webhooks(?:\/|\\\/)[^\s"'`<>\\\\]+/gi;
+
+      let sanitizedMessage = String(message || '')
+        .replace(/\d{6,14}:[A-Za-z0-9_-]{20,50}/g, '[REDACTED_TOKEN]')
+        .replace(/\/bot[^/\s?]+/gi, '/bot[REDACTED_TOKEN]')
+        .replace(DISCORD_WEBHOOK_REGEX, '[REDACTED_WEBHOOK]');
+
+      let sanitizedDetails = null;
+      if (details) {
+        sanitizedDetails = JSON.stringify(details)
+          .replace(/\d{6,14}:[A-Za-z0-9_-]{20,50}/g, '[REDACTED_TOKEN]')
+          .replace(/\/bot[^/\s?"]+/gi, '/bot[REDACTED_TOKEN]')
+          .replace(DISCORD_WEBHOOK_REGEX, '[REDACTED_WEBHOOK]');
+      }
 
       const entry = {
         id: 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
         timestamp: Date.now(),
         level: ['info', 'warn', 'error', 'success'].includes(level) ? level : 'info',
         message: sanitizedMessage,
-        details: details ? JSON.stringify(details).replace(/\d{8,12}:[A-Za-z0-9_-]{30,45}/g, '[REDACTED_TOKEN]') : null,
+        details: sanitizedDetails,
       };
 
       logs.unshift(entry); // Newest first

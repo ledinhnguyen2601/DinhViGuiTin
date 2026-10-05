@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Settings, ShieldCheck, FileText, PlayCircle } from 'lucide-react';
+import { Home, Settings, ShieldCheck, FileText } from 'lucide-react';
 import { TRIP_STATES } from '../config/constants.js';
 
 export function Navigation({ activeTab, setActiveTab, tripState }) {
@@ -7,7 +7,6 @@ export function Navigation({ activeTab, setActiveTab, tripState }) {
 
   const tabs = [
     { id: 'home', label: 'Hành trình', icon: Home },
-    { id: 'simulator', label: 'Giả lập GPS', icon: PlayCircle },
     { id: 'logs', label: 'Nhật ký', icon: FileText },
     { id: 'permissions', label: 'Cấp quyền', icon: ShieldCheck },
     { id: 'settings', label: 'Cài đặt', icon: Settings },
@@ -15,7 +14,7 @@ export function Navigation({ activeTab, setActiveTab, tripState }) {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-[env(safe-area-inset-bottom,0px)]">
-      <div className="max-w-md mx-auto grid grid-cols-5 h-16">
+      <div className="max-w-md mx-auto grid grid-cols-4 h-16">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

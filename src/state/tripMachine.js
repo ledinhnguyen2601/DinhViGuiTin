@@ -3,7 +3,7 @@
  * Manages trip lifecycle, transitions, noise-immune arrival detection, and state restoration
  */
 
-import { TRIP_STATES } from '../config/constants.js';
+import { TRIP_STATES, DEFAULT_RADIUS } from '../config/constants.js';
 import { StorageService } from '../services/storage.js';
 import {
   haversine,
@@ -217,18 +217,19 @@ export class TripMachine {
         this.recentValidSamples,
         targetLat,
         targetLng,
-        this.settings.radiusMeters
+        this.settings.radiusMeters || DEFAULT_RADIUS
       );
 
       if (isArrived) {
         this.state = TRIP_STATES.ARRIVED;
         this.arrivedNotified = true;
         arrived = true;
+        // C.5: Cờ arrivedNotified phải được lưu bền vào Capacitor Preferences (key: "trip") TRƯỚC khi gọi hàm gửi tin
         await this.persist();
         this.emitStateChange();
         await StorageService.addLog(
           'success',
-          `Xác nhận đến nơi! Khoảng cách ${Math.round(distMeters)}m <= ${this.settings.radiusMeters}m`
+          `Xác nhận đến nơi! Khoảng cách ${Math.round(distMeters)}m <= ${this.settings.radiusMeters || DEFAULT_RADIUS}m`
         );
         this.emitMetricsUpdate();
         return { arrived: true, filterChanged, newFilter: recommendedFilter };

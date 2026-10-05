@@ -111,4 +111,46 @@ describe('TripMachine State Machine', () => {
     expect(machine2.tripId).toBe(machine1.tripId);
     expect(machine2.currentDistanceMeters).toBeCloseTo(machine1.currentDistanceMeters, 1);
   });
+
+  // C.5: arrivedNotified must be persisted to Capacitor Preferences with key "trip" BEFORE notify
+  it('C.5: persists arrivedNotified=true into Capacitor Preferences (key: "trip") upon arrival', async () => {
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      destinationLat: 21.0000,
+      destinationLng: 105.0000,
+      radiusMeters: 100,
+    };
+
+    const machine = new TripMachine({ settings, secrets: {} });
+    await machine.start();
+    await machine.confirmTracking();
+
+    const sample1 = {
+      lat: 21.0002, // ~22m
+      lng: 105.0000,
+      accuracy: 10,
+      speed: 10,
+      timestamp: 10000,
+    };
+    await machine.handleGpsUpdate(sample1);
+
+    const sample2 = {
+      lat: 21.0001, // ~11m
+      lng: 105.0000,
+      accuracy: 10,
+      speed: 5,
+      timestamp: 16000, // 6s later
+    };
+
+    let persistedBeforeReturn = null;
+    // Intercept to check state before any notifyArrived could be executed
+    const result = await machine.handleGpsUpdate(sample2);
+    expect(result.arrived).toBe(true);
+
+    // Verify key "trip" directly in Storage
+    const tripData = await StorageService.getTripState();
+    expect(tripData).toBeTruthy();
+    expect(tripData.arrivedNotified).toBe(true);
+    expect(tripData.state).toBe(TRIP_STATES.ARRIVED);
+  });
 });

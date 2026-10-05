@@ -7,12 +7,13 @@ import { Home } from './pages/Home.jsx';
 import { Settings } from './pages/Settings.jsx';
 import { Permissions } from './pages/Permissions.jsx';
 import { Logs } from './pages/Logs.jsx';
-import { Simulator } from './pages/Simulator.jsx';
 import { TRIP_STATES } from './config/constants.js';
+import { useTelegramBot } from './hooks/useTelegramBot.js';
 
 export function App() {
   const [activeTab, setActiveTab] = useState('home');
   const tracker = useTracker();
+  useTelegramBot(tracker); // Initialize Telegram bot polling
 
   // Trigger celebration confetti when arrived
   useEffect(() => {
@@ -35,8 +36,6 @@ export function App() {
         return <Permissions />;
       case 'logs':
         return <Logs />;
-      case 'simulator':
-        return <Simulator tracker={tracker} setActiveTab={setActiveTab} />;
       case 'home':
       default:
         return <Home tracker={tracker} setActiveTab={setActiveTab} />;

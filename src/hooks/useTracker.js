@@ -10,6 +10,8 @@ import { NotifierService } from '../services/notifier.js';
 import { StorageService } from '../services/storage.js';
 import { TelegramService } from '../services/telegram.js';
 import { SmsService } from '../services/sms.js';
+import { Device } from '@capacitor/device';
+import { Network } from '@capacitor/network';
 import { TRIP_STATES, DEFAULT_SETTINGS, DEFAULT_SECRETS } from '../config/constants.js';
 
 export function useTracker() {
@@ -25,8 +27,13 @@ export function useTracker() {
     filterBand: 15,
   });
   const [gpsError, setGpsError] = useState(null);
-  const [isSimulating, setIsSimulating] = useState(false);
   const [telegramStatus, setTelegramStatus] = useState('not_configured'); // 'connected' | 'not_configured' | 'error'
+  const [deviceInfo, setDeviceInfo] = useState({
+    battery: null, // percentage
+    isCharging: false,
+    networkType: 'unknown', // 'wifi', 'cellular', 'none', etc.
+    isConnected: true
+  });
 
   const machineRef = useRef(null);
 
@@ -77,8 +84,40 @@ export function useTracker() {
 
     init();
 
+    // Track Device Info (Battery & Network)
+    let deviceInterval;
+    const updateDeviceInfo = async () => {
+      try {
+        const [bat, net] = await Promise.all([
+          Device.getBatteryInfo().catch(() => ({})),
+          Network.getStatus().catch(() => ({}))
+        ]);
+        if (!isMounted) return;
+        setDeviceInfo({
+          battery: bat.batteryLevel !== undefined ? Math.round(bat.batteryLevel * 100) : null,
+          isCharging: bat.isCharging || false,
+          networkType: net.connectionType || 'unknown',
+          isConnected: net.connected ?? true
+        });
+      } catch (e) {}
+    };
+    
+    updateDeviceInfo();
+    deviceInterval = setInterval(updateDeviceInfo, 10000); // Update every 10s
+
+    const networkListener = Network.addListener('networkStatusChange', (status) => {
+      if (!isMounted) return;
+      setDeviceInfo(prev => ({
+        ...prev,
+        networkType: status.connectionType,
+        isConnected: status.connected
+      }));
+    });
+
     return () => {
       isMounted = false;
+      clearInterval(deviceInterval);
+      if (networkListener.remove) networkListener.remove();
       LocationService.stopWatching();
     };
   }, []);
@@ -180,7 +219,6 @@ export function useTracker() {
   const stopTrip = useCallback(async () => {
     if (!machineRef.current) return;
     await LocationService.stopWatching();
-    setIsSimulating(false);
     await machineRef.current.stop();
   }, []);
 
@@ -190,7 +228,6 @@ export function useTracker() {
   const resetTrip = useCallback(async () => {
     if (!machineRef.current) return;
     await LocationService.stopWatching();
-    setIsSimulating(false);
     await machineRef.current.reset();
     setMetrics({
       speedKmh: 0,
@@ -201,37 +238,6 @@ export function useTracker() {
       filterBand: 15,
     });
   }, []);
-
-  /**
-   * Runs an in-app simulated journey for testing arrival
-   */
-  const runSimulation = useCallback((waypoints, intervalMs = 2000) => {
-    if (!machineRef.current) return;
-    const machine = machineRef.current;
-    machine.settings = settings;
-    machine.secrets = secrets;
-
-    setIsSimulating(true);
-    machine.start().then(async () => {
-      await machine.confirmTracking();
-
-      LocationService.startSimulation(waypoints, intervalMs, async (sample) => {
-        const result = await machine.handleGpsUpdate(sample);
-
-        if (result.arrived) {
-          setIsSimulating(false);
-          await LocationService.stopWatching();
-          await NotifierService.notifyArrived({
-            settings,
-            secrets: machine.secrets,
-            tripId: machine.tripId,
-            arrivalTime: Date.now(),
-          });
-          await machine.finish();
-        }
-      });
-    });
-  }, [settings, secrets]);
 
   /**
    * Updates and saves settings
@@ -320,16 +326,15 @@ export function useTracker() {
     tripState,
     metrics,
     gpsError,
-    isSimulating,
     telegramStatus,
     startTrip,
     stopTrip,
     resetTrip,
-    runSimulation,
     updateSettings,
     updateSecrets,
     testTelegramConnection,
     sendTestTelegram,
     sendTestSms,
+    deviceInfo,
   };
 }

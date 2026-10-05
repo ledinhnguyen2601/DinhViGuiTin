@@ -8,7 +8,6 @@ import { StorageService } from './storage.js';
 
 let activeWatchId = null;
 let currentDistanceFilter = 15;
-let simulationInterval = null;
 
 export const LocationService = {
   /**
@@ -187,11 +186,6 @@ export const LocationService = {
    * Stops GPS watcher
    */
   async stopWatching() {
-    if (simulationInterval) {
-      clearInterval(simulationInterval);
-      simulationInterval = null;
-    }
-
     if (activeWatchId !== null) {
       try {
         if (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform()) {
@@ -209,36 +203,5 @@ export const LocationService = {
       }
       activeWatchId = null;
     }
-  },
-
-  /**
-   * Starts a simulated GPS journey along waypoint coordinates (for live testing)
-   */
-  startSimulation(waypoints, intervalMs = 2500, onLocation) {
-    this.stopWatching();
-    let index = 0;
-
-    // Send first sample immediately
-    if (waypoints.length > 0) {
-      onLocation(waypoints[0]);
-      index = 1;
-    }
-
-    simulationInterval = setInterval(() => {
-      if (index >= waypoints.length) {
-        clearInterval(simulationInterval);
-        simulationInterval = null;
-        return;
-      }
-      onLocation(waypoints[index]);
-      index++;
-    }, intervalMs);
-
-    return () => {
-      if (simulationInterval) {
-        clearInterval(simulationInterval);
-        simulationInterval = null;
-      }
-    };
   }
 };

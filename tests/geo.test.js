@@ -10,8 +10,81 @@ import {
   toNonAccentVietnamese,
   formatDistance,
 } from '../src/services/geo.js';
+import {
+  DEFAULT_RADIUS,
+  DEFAULT_RADIUS_METERS,
+  ACCURACY_THRESHOLD_NFR,
+  NFR_ACCURACY_THRESHOLD_METERS,
+  GPS_THRESHOLDS,
+} from '../src/config/constants.js';
 
 describe('Geo calculations and noise immunity', () => {
+  it('FR-02 & NFR: defines default radius as 100m and NFR accuracy threshold as <= 100m', () => {
+    expect(DEFAULT_RADIUS).toBe(100);
+    expect(DEFAULT_RADIUS_METERS).toBe(100);
+    expect(NFR_ACCURACY_THRESHOLD_METERS).toBe(100);
+    expect(ACCURACY_THRESHOLD_NFR).toBe('≤ 100 m với bán kính mặc định');
+    expect(GPS_THRESHOLDS.ACCURACY_THRESHOLD_NFR).toBe(100);
+    expect(GPS_THRESHOLDS.MAX_ACCURACY_METERS).toBe(50);
+  });
+
+  it('C.4: requires ALL 3 conditions for arrival (distance <= 100m, accuracy <= 50m, 2 consecutive >= 5s)', () => {
+    const targetLat = 21.0285;
+    const targetLng = 105.8544;
+
+    const sampleValid1 = {
+      lat: 21.0286, // ~15m
+      lng: 105.8545,
+      accuracy: 20, // <= 50m
+      timestamp: 10000,
+    };
+
+    const sampleValid2 = {
+      lat: 21.02855, // ~8m
+      lng: 105.85445,
+      accuracy: 15, // <= 50m
+      timestamp: 16000, // 6s later (>= 5s)
+    };
+
+    // 1. All 3 conditions met (using default 100m radius without passing argument)
+    expect(checkGeofenceArrival(sampleValid2, [sampleValid1], targetLat, targetLng)).toBe(true);
+
+    // 2. Fails Condition 1: Distance > radius (e.g. ~150m away)
+    const sampleFar = {
+      lat: 21.0300, // ~167m away
+      lng: 105.8544,
+      accuracy: 10,
+      timestamp: 22000,
+    };
+    expect(checkGeofenceArrival(sampleFar, [sampleValid2], targetLat, targetLng)).toBe(false);
+
+    // 3. Fails Condition 2: Accuracy > 50m (e.g. 52m)
+    const sampleInaccurate = {
+      lat: 21.02855,
+      lng: 105.85445,
+      accuracy: 52, // > 50m!
+      timestamp: 22000,
+    };
+    expect(checkGeofenceArrival(sampleInaccurate, [sampleValid2], targetLat, targetLng)).toBe(false);
+
+    // 4. Fails Condition 3: Samples inside radius separated by < 5s (e.g. only 3s)
+    const sampleFast = {
+      lat: 21.02855,
+      lng: 105.85445,
+      accuracy: 10,
+      timestamp: 13000, // only 3s after sampleValid1
+    };
+    expect(checkGeofenceArrival(sampleFast, [sampleValid1], targetLat, targetLng)).toBe(false);
+
+    // 5. Streak broken by an intermediate sample outside radius
+    const sampleFarIntermediate = {
+      lat: 21.0400, // 2km away
+      lng: 105.8544,
+      accuracy: 10,
+      timestamp: 15000,
+    };
+    expect(checkGeofenceArrival(sampleValid2, [sampleFarIntermediate, sampleValid1], targetLat, targetLng)).toBe(false);
+  });
   // TC-01: Haversine distance verification
   it('TC-01: Haversine calculates correct distance (~1000.8m for 0.009 deg lat change)', () => {
     const lat1 = 21.0000;

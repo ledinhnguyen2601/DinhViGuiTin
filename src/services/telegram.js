@@ -207,5 +207,35 @@ export const TelegramService = {
       const errorInfo = classifyTelegramError(err);
       return { ok: false, ...errorInfo };
     }
+  },
+
+  /**
+   * Fetches updates for reverse query polling
+   */
+  async getUpdates(botToken, offset = null, timeout = 30) {
+    const cleanToken = (botToken || '').trim();
+    if (!cleanToken) return { ok: false, error: 'Chưa nhập Bot Token' };
+
+    try {
+      let url = `${TELEGRAM_API_BASE}/bot${cleanToken}/getUpdates?timeout=${timeout}`;
+      if (offset) {
+        url += `&offset=${offset}`;
+      }
+      // Use longer timeout for long polling
+      const res = await fetchWithTimeout(url, { method: 'GET' }, (timeout + 5) * 1000);
+      const json = await res.json().catch(() => null);
+
+      if (res.ok && json?.ok) {
+        return {
+          ok: true,
+          updates: json.result || [],
+        };
+      }
+      const errorInfo = classifyTelegramError(null, res.status, json);
+      return { ok: false, ...errorInfo };
+    } catch (err) {
+      const errorInfo = classifyTelegramError(err);
+      return { ok: false, ...errorInfo };
+    }
   }
 };

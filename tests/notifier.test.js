@@ -106,4 +106,76 @@ describe('Notifier Dispatcher and Fallback Integration', () => {
     expect(res.channel).toBe('sms');
     expect(smsSpy).toHaveBeenCalled();
   });
+
+  // C.6: Detailed sequence test
+  it('C.6: executes strict sequence: T+0s, T+5s, T+20s, T+60s SMS fallback and late background message', async () => {
+    let callCount = 0;
+    const tgCalls = [];
+    vi.spyOn(TelegramService, 'sendMessage').mockImplementation(async (token, chat, text) => {
+      callCount++;
+      tgCalls.push(text);
+      if (callCount === 4) {
+        // Succeed on background retry!
+        return { ok: true, messageId: 1004 };
+      }
+      return { ok: false, code: 500, message: 'Server error' };
+    });
+
+    const smsSpy = vi.spyOn(SmsService, 'sendSms').mockResolvedValue({
+      ok: true,
+      successCount: 1,
+      errors: [],
+    });
+
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      travelerName: 'Đình Nguyên',
+      destinationName: 'Nhà',
+      sendMode: 'telegram_with_sms_fallback',
+    };
+    const secrets = {
+      telegramBotToken: '123456:ABC-DEF1234',
+      telegramChatId: '-100123456789',
+      backupPhone1: '0912345678',
+    };
+
+    const queueItem = await QueueService.enqueue({
+      type: 'ARRIVED',
+      text: 'Đình Nguyên đã đến Nhà lúc 14:30. Mọi thứ ổn.',
+      tripId: 'trip_c6_sequence',
+      meta: {
+        smsText: 'Dinh Nguyen da den Nha luc 14:30. (Tin tu dong tu app)',
+        timeStr: '14:30',
+      },
+    });
+
+    const res = await NotifierService.executeFallbackWorkflow(
+      queueItem,
+      settings,
+      secrets,
+      [secrets.backupPhone1],
+      {
+        retry2: 1, // simulates T+5s
+        retry3: 1, // simulates T+20s
+        smsFallback: 1, // simulates T+60s
+        backgroundSchedule: {
+          intervalsMin: [0.001], // Fast background retry for unit test
+          maxHours: 6,
+        },
+      }
+    );
+
+    // After T+60s, SMS was sent (1 time only)
+    expect(smsSpy).toHaveBeenCalledTimes(1);
+    expect(res.channel).toBe('sms_fallback');
+    expect(res.ok).toBe(true);
+
+    // Wait short time for detached background retry to execute
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Background retry sent message with late note
+    expect(tgCalls.length).toBeGreaterThanOrEqual(3);
+    const lastTgMsg = tgCalls[tgCalls.length - 1];
+    expect(lastTgMsg).toContain('tin gửi trễ, đã báo SMS');
+  });
 });

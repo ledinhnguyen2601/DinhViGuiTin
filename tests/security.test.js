@@ -81,4 +81,29 @@ describe('Security & Privacy Protections', () => {
     const cleaned = toNonAccentVietnamese(dirty);
     expect(cleaned).toBe('Nguoi dung <script>alert(1)</script> di toi Ha Noi');
   });
+
+  // C.7: Bot Token must NEVER be written to localStorage
+  it('C.7: strictly ensures Bot Token is NEVER stored in window.localStorage', async () => {
+    const fakeToken = '7123456789:AAFlkjw9384jsdfk_30492834sdfsdfAA';
+    await StorageService.saveSecrets({
+      telegramBotToken: fakeToken,
+      telegramChatId: '-100123456789',
+      backupPhone1: '0912345678',
+    });
+
+    // Check localStorage directly
+    if (typeof window !== 'undefined' && window.localStorage) {
+      expect(window.localStorage.getItem('geofence_secrets')).toBeNull();
+      // Inspect all localStorage keys/values
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        const val = window.localStorage.getItem(k);
+        expect(val).not.toContain(fakeToken);
+      }
+    }
+
+    // But retrieve via StorageService still works (via memory / Capacitor Preferences)
+    const secrets = await StorageService.getSecrets();
+    expect(secrets.telegramBotToken).toBe(fakeToken);
+  });
 });

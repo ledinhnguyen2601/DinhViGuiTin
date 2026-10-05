@@ -5,12 +5,20 @@
 
 export const EARTH_RADIUS_METERS = 6371000;
 
+// FR-02: Bán kính geofence mặc định là 100 m (không phải 50 m)
+export const DEFAULT_RADIUS = 100;
+export const DEFAULT_RADIUS_METERS = 100;
+
+// NFR: Ngưỡng phi chức năng độ chính xác: "≤ 100 m với bán kính mặc định"
+export const ACCURACY_THRESHOLD_NFR = '≤ 100 m với bán kính mặc định';
+export const NFR_ACCURACY_THRESHOLD_METERS = 100;
+
 export const DEFAULT_SETTINGS = {
   travelerName: 'Đình Nguyên',
   destinationName: 'Nhà',
   destinationLat: 21.028511, // Default Hanoi coords or customizable
   destinationLng: 105.854444,
-  radiusMeters: 100, // 50 - 500m (default 100m)
+  radiusMeters: DEFAULT_RADIUS, // FR-02: Bán kính geofence mặc định 100m (50 - 500m)
   roadFactor: 1.3, // 1.0 - 2.0 (default 1.3)
   sendMode: 'telegram_with_sms_fallback', // 'telegram_only' | 'telegram_with_sms_fallback' | 'sms_only'
   sendStartMessage: true,
@@ -21,6 +29,7 @@ export const DEFAULT_SETTINGS = {
 export const DEFAULT_SECRETS = {
   telegramBotToken: '',
   telegramChatId: '',
+  discordWebhookUrl: '',
   backupPhone1: '',
   backupPhone2: '',
 };
@@ -32,13 +41,14 @@ export const DISTANCE_FILTER_BANDS = [
 ];
 
 export const GPS_THRESHOLDS = {
-  MAX_ACCURACY_METERS: 50, // Samples with accuracy > 50m discarded
+  MAX_ACCURACY_METERS: 50, // Điều kiện mẫu GPS hợp lệ <= 50m
+  ACCURACY_THRESHOLD_NFR: 100, // NFR: Ngưỡng phi chức năng độ chính xác ≤ 100 m với bán kính mặc định
   MAX_REALISTIC_SPEED_MPS: 60, // 216 km/h max
   SPEED_EMA_ALPHA: 0.3, // Exponential moving average smoothing factor
   MIN_MOVING_SPEED_KMH: 1.0, // Under 1 km/h considered 0
   MIN_SPEED_FOR_ETA_KMH: 5.0, // Under 5 km/h ETA displays '—'
-  GEOFENCE_CONSECUTIVE_SAMPLES: 2, // Must meet criteria 2 consecutive times
-  GEOFENCE_SAMPLE_MIN_INTERVAL_MS: 5000, // Samples must be at least 5s apart
+  GEOFENCE_CONSECUTIVE_SAMPLES: 2, // Phải đạt 2 mẫu liên tiếp cách nhau >= 5s
+  GEOFENCE_SAMPLE_MIN_INTERVAL_MS: 5000, // Các mẫu cách nhau ít nhất 5s
   NO_GPS_WARNING_MS: 5 * 60 * 1000, // 5 minutes without GPS triggers warning
   LOW_BATTERY_THRESHOLD: 15, // 15%
 };
@@ -53,7 +63,7 @@ export const RETRY_SCHEDULE = {
 export const STORAGE_KEYS = {
   SETTINGS: 'geofence_settings',
   SECRETS: 'geofence_secrets',
-  TRIP: 'geofence_current_trip',
+  TRIP: 'trip', // C.5: Lưu bền vào Capacitor Preferences với key "trip"
   QUEUE: 'geofence_message_queue',
   LOGS: 'geofence_activity_logs',
 };
@@ -78,11 +88,24 @@ export const MESSAGE_TEMPLATES = {
   ARRIVED_SMS: (name, dest, timeStr) => 
     `${name} da den ${dest} luc ${timeStr}. (Tin tu dong tu app)`,
   ARRIVED_TELEGRAM_LATE: (name, dest, timeStr, smsTimeStr) => 
-    `${name} đã đến ${dest} lúc ${timeStr}. (Tin gửi trễ, đã báo qua SMS lúc ${smsTimeStr})`,
+    smsTimeStr
+      ? `${name} đã đến ${dest} lúc ${timeStr}. (tin gửi trễ, đã báo SMS lúc ${smsTimeStr})`
+      : `${name} đã đến ${dest} lúc ${timeStr}. (tin gửi trễ, đã báo SMS)`,
   GPS_LOST: (name, minutes, distanceStr) => 
     `${name}: mất tín hiệu GPS ${minutes} phút. Vị trí cuối còn cách điểm đến khoảng ${distanceStr}.`,
   LOW_BATTERY: (name, percent) => 
     `Điện thoại của ${name} còn ${percent}% pin.`,
   TIMEOUT: (hours) => 
     `Hành trình đã tự dừng sau ${hours} giờ mà chưa đến nơi.`,
+};
+
+export const NOTIFICATION_CHANNELS = {
+  TELEGRAM: 'telegram',
+  DISCORD:  'discord',
+  SMS:      'sms',
+};
+
+export const DISCORD_DEFAULTS = {
+  USERNAME: 'Geofencing Tracker',   // tên hiển thị trong Discord
+  AVATAR_URL: '',                    // để trống, dùng avatar mặc định
 };

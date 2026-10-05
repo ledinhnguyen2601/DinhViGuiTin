@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigation2, ShieldCheck, Settings, FileText, PlayCircle } from 'lucide-react';
+import { Navigation2, ShieldCheck, Settings, FileText } from 'lucide-react';
 import { TRIP_STATES } from '../config/constants.js';
 
 export function Header({ activeTab, setActiveTab, tripState }) {
@@ -28,17 +28,6 @@ export function Header({ activeTab, setActiveTab, tripState }) {
         </div>
 
         <div className="flex items-center space-x-1">
-          <button
-            onClick={() => setActiveTab('simulator')}
-            title="Bộ giả lập GPS"
-            className={`p-2 rounded-xl transition ${
-              activeTab === 'simulator'
-                ? 'bg-brand-50 text-brand-600 font-semibold'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <PlayCircle className="w-5 h-5" />
-          </button>
           <button
             onClick={() => setActiveTab('logs')}
             title="Nhật ký"

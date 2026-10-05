@@ -5,6 +5,7 @@
 
 import {
   EARTH_RADIUS_METERS,
+  DEFAULT_RADIUS,
   GPS_THRESHOLDS,
   DISTANCE_FILTER_BANDS
 } from '../config/constants.js';
@@ -117,39 +118,63 @@ export function calculateEtaMinutes(distanceMeters, smoothedSpeedKmh, roadFactor
 }
 
 /**
- * Evaluates whether device has arrived in geofence with noise immunity
- * Requires 2 consecutive valid samples inside radius separated by at least 5s
- * @param {Object} currentSample 
+ * Evaluates whether device has arrived in geofence with noise immunity (C.4)
+ * Điều kiện "đã đến nơi" phải thỏa mãn đủ CẢ BA:
+ * 1. Khoảng cách <= bán kính (mặc định 100 m)
+ * 2. Độ chính xác GPS <= 50 m
+ * 3. 2 mẫu liên tiếp cách nhau ít nhất 5 giây
+ * 
+ * @param {Object} currentSample { lat, lng, accuracy, timestamp }
  * @param {Array<Object>} historySamples recent valid samples (newest first)
  * @param {number} targetLat 
  * @param {number} targetLng 
- * @param {number} radiusMeters 
+ * @param {number} radiusMeters (mặc định 100 m - FR-02)
  * @returns {boolean}
  */
-export function checkGeofenceArrival(currentSample, historySamples, targetLat, targetLng, radiusMeters) {
-  if (!currentSample || currentSample.accuracy > GPS_THRESHOLDS.MAX_ACCURACY_METERS) {
+export function checkGeofenceArrival(currentSample, historySamples, targetLat, targetLng, radiusMeters = DEFAULT_RADIUS) {
+  if (!currentSample || typeof currentSample.lat !== 'number' || typeof currentSample.lng !== 'number') {
     return false;
   }
 
+  // Điều kiện 2: Độ chính xác GPS <= 50 m
+  const currentAccuracy = typeof currentSample.accuracy === 'number' ? currentSample.accuracy : 999;
+  if (currentAccuracy > GPS_THRESHOLDS.MAX_ACCURACY_METERS) {
+    return false;
+  }
+
+  // Điều kiện 1: Khoảng cách <= bán kính (mặc định 100 m)
+  const effectiveRadius = (typeof radiusMeters === 'number' && radiusMeters > 0) ? radiusMeters : DEFAULT_RADIUS;
   const currentDist = haversine(currentSample.lat, currentSample.lng, targetLat, targetLng);
-  if (currentDist > radiusMeters) {
+  if (currentDist > effectiveRadius) {
     return false;
   }
 
-  // Look for a preceding valid sample within radius separated by at least 5s
+  // Điều kiện 3: 2 mẫu liên tiếp cách nhau ít nhất 5 giây
   if (!Array.isArray(historySamples) || historySamples.length === 0) {
     return false;
   }
 
   for (const prev of historySamples) {
     if (prev === currentSample) continue;
-    if (prev.accuracy <= GPS_THRESHOLDS.MAX_ACCURACY_METERS) {
-      const prevDist = haversine(prev.lat, prev.lng, targetLat, targetLng);
-      const timeDiff = Math.abs(currentSample.timestamp - prev.timestamp);
 
-      if (prevDist <= radiusMeters && timeDiff >= GPS_THRESHOLDS.GEOFENCE_SAMPLE_MIN_INTERVAL_MS) {
-        return true;
-      }
+    if (!prev || typeof prev.lat !== 'number' || typeof prev.lng !== 'number') {
+      continue;
+    }
+
+    const prevAcc = typeof prev.accuracy === 'number' ? prev.accuracy : 999;
+    if (prevAcc > GPS_THRESHOLDS.MAX_ACCURACY_METERS) {
+      continue;
+    }
+
+    const prevDist = haversine(prev.lat, prev.lng, targetLat, targetLng);
+    if (prevDist > effectiveRadius) {
+      // Mẫu gần nhất ngoài bán kính -> chuỗi liên tiếp trong geofence bị ngắt
+      return false;
+    }
+
+    const timeDiff = Math.abs(currentSample.timestamp - prev.timestamp);
+    if (timeDiff >= GPS_THRESHOLDS.GEOFENCE_SAMPLE_MIN_INTERVAL_MS) {
+      return true;
     }
   }
 

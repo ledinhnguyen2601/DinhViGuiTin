@@ -2,14 +2,14 @@ import React from 'react';
 import { TRIP_STATES } from '../config/constants.js';
 import { CheckCircle2, AlertTriangle, Compass, StopCircle, Radio, Clock } from 'lucide-react';
 
-export function StatusCard({ state, isSimulating }) {
+export function StatusCard({ state }) {
   const getStatusConfig = () => {
     switch (state) {
       case TRIP_STATES.TRACKING:
         return {
           bg: 'bg-emerald-50 border-emerald-200 text-emerald-900',
           badgeBg: 'bg-emerald-500',
-          badgeText: isSimulating ? 'Đang giả lập hành trình' : 'Đang theo dõi trực tiếp',
+          badgeText: 'Đang theo dõi trực tiếp',
           title: 'Đang di chuyển trên đường',
           desc: 'GPS ngầm đang hoạt động. Sẽ tự động gửi tin nhắn báo người thân khi vào bán kính.',
           icon: Radio,
