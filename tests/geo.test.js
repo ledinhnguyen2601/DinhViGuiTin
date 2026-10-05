@@ -242,4 +242,14 @@ describe('Geo calculations and noise immunity', () => {
     expect(formatDistance(1250)).toBe('1.3 km');
     expect(formatDistance(12000)).toBe('12.0 km');
   });
+
+  it('reverseGeocode handles network errors gracefully without crashing', async () => {
+    const { reverseGeocode } = await import('../src/services/geo.js');
+    // Test with invalid / mock fetch failure
+    const originalFetch = global.fetch;
+    global.fetch = () => Promise.reject(new Error('Network error'));
+    const result = await reverseGeocode(21.0285, 105.8544);
+    expect(result).toBeNull();
+    global.fetch = originalFetch;
+  });
 });

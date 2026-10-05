@@ -253,3 +253,40 @@ export function toNonAccentVietnamese(str) {
   res = res.replace(/\u02C6|\u0306|\u031B/g, '');
   return res;
 }
+
+/**
+ * Reverse geocodes latitude and longitude to a human-readable location name
+ * @param {number} lat
+ * @param {number} lng
+ * @returns {Promise<string|null>}
+ */
+export async function reverseGeocode(lat, lng) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+    const res = await fetch(url, {
+      headers: {
+        'Accept-Language': 'vi,en',
+        'User-Agent': 'GeofencingTracker/1.0'
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data) {
+        const addr = data.address || {};
+        const placeName = addr.amenity || addr.building || addr.shop || addr.tourism || addr.historic || addr.leisure;
+        const road = addr.road || addr.pedestrian || addr.suburb || addr.quarter;
+        if (placeName && road) {
+          return `${placeName}, ${road}`;
+        }
+        if (placeName) return placeName;
+        if (road) return road;
+        if (data.display_name) {
+          return data.display_name.split(',')[0].trim();
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Reverse geocode failed:', e);
+  }
+  return null;
+}

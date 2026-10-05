@@ -25,6 +25,7 @@ import { ConfirmModal } from '../components/ConfirmModal.jsx';
 import { MapPicker } from '../components/MapPicker.jsx';
 import { DEFAULT_RADIUS } from '../config/constants.js';
 import { testDiscordWebhook, validateDiscordWebhookUrl } from '../services/discord.js';
+import { reverseGeocode } from '../services/geo.js';
 
 function DiscordIcon({ className = 'w-4 h-4' }) {
   return (
@@ -58,13 +59,21 @@ export function Settings({ tracker }) {
     formSecretsRef.current = formSecrets;
   }, [formSecrets]);
 
-  // Sync form state when tracker settings/secrets finish loading from storage
+  // Sync form state only once when initial storage data arrives
+  const hasInitializedSettingsRef = useRef(false);
   useEffect(() => {
-    setFormSettings((prev) => ({ ...settings, ...prev }));
+    if (!hasInitializedSettingsRef.current && settings) {
+      setFormSettings({ ...settings });
+      hasInitializedSettingsRef.current = true;
+    }
   }, [settings]);
 
+  const hasInitializedSecretsRef = useRef(false);
   useEffect(() => {
-    setFormSecrets((prev) => ({ ...secrets, ...prev }));
+    if (!hasInitializedSecretsRef.current && secrets) {
+      setFormSecrets({ ...secrets });
+      hasInitializedSecretsRef.current = true;
+    }
   }, [secrets]);
 
   // Auto-save on unmount (e.g. when user switches tab to Home)
@@ -109,12 +118,16 @@ export function Settings({ tracker }) {
     setIsLocating(true);
     try {
       const pos = await LocationService.getCurrentPosition();
+      const roundedLat = Number(pos.lat.toFixed(6));
+      const roundedLng = Number(pos.lng.toFixed(6));
+      const placeName = await reverseGeocode(roundedLat, roundedLng);
       setFormSettings((prev) => ({
         ...prev,
-        destinationLat: Number(pos.lat.toFixed(6)),
-        destinationLng: Number(pos.lng.toFixed(6)),
+        destinationLat: roundedLat,
+        destinationLng: roundedLng,
+        destinationName: placeName || prev.destinationName,
       }));
-      showNotification('success', `Đã lấy tọa độ hiện tại (±${Math.round(pos.accuracy || 0)}m)!`);
+      showNotification('success', placeName ? `Đã lấy vị trí: ${placeName}` : `Đã lấy tọa độ hiện tại!`);
     } catch (e) {
       showNotification('error', `Lỗi lấy vị trí: ${e.message}`);
     } finally {
@@ -148,18 +161,43 @@ export function Settings({ tracker }) {
          }
       }
 
-      // Try to extract @lat,lng
+      // 1. Try to extract Place Name from URL
+      let extractedName = '';
+      const placeMatch = urlToParse.match(/\/place\/([^/@?#]+)/);
+      if (placeMatch && placeMatch[1]) {
+        try {
+          extractedName = decodeURIComponent(placeMatch[1].replace(/\+/g, ' ')).trim();
+        } catch (e) {}
+      } else {
+        const searchMatch = urlToParse.match(/\/search\/([^/@?#]+)/);
+        if (searchMatch && searchMatch[1]) {
+          try {
+            extractedName = decodeURIComponent(searchMatch[1].replace(/\+/g, ' ')).trim();
+          } catch (e) {}
+        }
+      }
+
+      // 2. Try to extract @lat,lng
       const regex = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
       const match = urlToParse.match(regex);
       if (match && match.length >= 3) {
         const lat = parseFloat(match[1]);
         const lng = parseFloat(match[2]);
+        const roundedLat = Number(lat.toFixed(6));
+        const roundedLng = Number(lng.toFixed(6));
+
+        // If no place name in URL, reverse geocode it
+        if (!extractedName) {
+          extractedName = await reverseGeocode(roundedLat, roundedLng);
+        }
+
         setFormSettings((prev) => ({
           ...prev,
-          destinationLat: Number(lat.toFixed(6)),
-          destinationLng: Number(lng.toFixed(6)),
+          destinationLat: roundedLat,
+          destinationLng: roundedLng,
+          destinationName: extractedName || prev.destinationName,
         }));
-        showNotification('success', `Đã trích xuất tọa độ thành công!`);
+        showNotification('success', extractedName ? `Đã nhận diện: ${extractedName}` : `Đã trích xuất tọa độ thành công!`);
         setPastedLink('');
       } else {
          // Try extracting from query params api=1&query=lat,lng
@@ -168,12 +206,20 @@ export function Settings({ tracker }) {
          if (qMatch && qMatch.length >= 3) {
             const lat = parseFloat(qMatch[1]);
             const lng = parseFloat(qMatch[2]);
+            const roundedLat = Number(lat.toFixed(6));
+            const roundedLng = Number(lng.toFixed(6));
+
+            if (!extractedName) {
+              extractedName = await reverseGeocode(roundedLat, roundedLng);
+            }
+
             setFormSettings((prev) => ({
               ...prev,
-              destinationLat: Number(lat.toFixed(6)),
-              destinationLng: Number(lng.toFixed(6)),
+              destinationLat: roundedLat,
+              destinationLng: roundedLng,
+              destinationName: extractedName || prev.destinationName,
             }));
-            showNotification('success', `Đã trích xuất tọa độ thành công!`);
+            showNotification('success', extractedName ? `Đã nhận diện: ${extractedName}` : `Đã trích xuất tọa độ thành công!`);
             setPastedLink('');
          } else {
             showNotification('error', 'Không tìm thấy tọa độ trong link này. Vui lòng mở link, copy URL dài trên thanh địa chỉ.');
@@ -267,10 +313,18 @@ export function Settings({ tracker }) {
         <MapPicker
           initialLat={formSettings.destinationLat}
           initialLng={formSettings.destinationLng}
-          onSelect={(lat, lng) => {
-            setFormSettings({ ...formSettings, destinationLat: Number(lat.toFixed(6)), destinationLng: Number(lng.toFixed(6)) });
+          onSelect={async (lat, lng) => {
+            const roundedLat = Number(lat.toFixed(6));
+            const roundedLng = Number(lng.toFixed(6));
             setShowMapPicker(false);
-            showNotification('success', `Đã chọn vị trí: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+            const placeName = await reverseGeocode(roundedLat, roundedLng);
+            setFormSettings((prev) => ({
+              ...prev,
+              destinationLat: roundedLat,
+              destinationLng: roundedLng,
+              destinationName: placeName || prev.destinationName,
+            }));
+            showNotification('success', placeName ? `Đã chọn: ${placeName}` : `Đã chọn tọa độ: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
           }}
           onClose={() => setShowMapPicker(false)}
         />
@@ -321,27 +375,33 @@ export function Settings({ tracker }) {
           </label>
           <input
             type="text"
+            inputMode="text"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             maxLength={30}
             value={formSettings.travelerName ?? ''}
             onChange={(e) => setFormSettings({ ...formSettings, travelerName: e.target.value })}
-            onBlur={() => updateSettings(formSettings)}
             placeholder="VD: Đình Nguyên"
-            className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-900"
+            className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-900 select-text"
           />
         </div>
 
         <div>
           <label className="block text-xs font-semibold text-slate-700 mb-1">
-            Tên điểm đến
+            Tên điểm đến (tự điền từ Map hoặc gõ tay tùy ý)
           </label>
           <input
             type="text"
+            inputMode="text"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             maxLength={50}
             value={formSettings.destinationName ?? ''}
             onChange={(e) => setFormSettings({ ...formSettings, destinationName: e.target.value })}
-            onBlur={() => updateSettings(formSettings)}
             placeholder="VD: Nhà, Quê ngoại, Ký túc xá"
-            className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-900"
+            className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-900 select-text"
           />
         </div>
 
@@ -364,10 +424,14 @@ export function Settings({ tracker }) {
           <div className="flex space-x-2">
             <input
               type="url"
+              inputMode="url"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               value={pastedLink}
               onChange={(e) => setPastedLink(e.target.value)}
               placeholder="VD: https://maps.app.goo.gl/..."
-              className="flex-1 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 text-xs text-slate-900"
+              className="flex-1 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 text-xs text-slate-900 select-text"
             />
             <button
               onClick={handleParseMapLink}
@@ -472,13 +536,17 @@ export function Settings({ tracker }) {
             <div className="flex space-x-2">
               <input
                 type={showDiscordUrl ? 'text' : 'password'}
+                inputMode="url"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={formSecrets.discordWebhookUrl || ''}
                 onChange={(e) => {
                   setFormSecrets({ ...formSecrets, discordWebhookUrl: e.target.value });
                   setDiscordTestResult(null);
                 }}
                 placeholder="https://discord.com/api/webhooks/..."
-                className={`flex-1 px-3 py-2 rounded-xl border font-mono text-xs text-slate-900 focus:outline-none focus:ring-2 ${
+                className={`flex-1 px-3 py-2 rounded-xl border font-mono text-xs text-slate-900 focus:outline-none focus:ring-2 select-text ${
                   isDiscordUrlInvalid
                     ? 'border-rose-300 focus:ring-rose-500 bg-rose-50/30'
                     : 'border-slate-200 focus:ring-brand-500'
@@ -541,10 +609,13 @@ export function Settings({ tracker }) {
             </div>
             <input
               type={showToken ? 'text' : 'password'}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               value={formSecrets.telegramBotToken}
               onChange={(e) => setFormSecrets({ ...formSecrets, telegramBotToken: e.target.value })}
               placeholder="123456789:AAFlkjw9384jsdfk..."
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 select-text"
             />
           </div>
 
@@ -562,10 +633,14 @@ export function Settings({ tracker }) {
             </div>
             <input
               type="text"
+              inputMode="text"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               value={formSecrets.telegramChatId}
               onChange={(e) => setFormSecrets({ ...formSecrets, telegramChatId: e.target.value })}
               placeholder="-100123456789"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 select-text"
             />
           </div>
 
@@ -607,20 +682,28 @@ export function Settings({ tracker }) {
             <label className="block text-xs font-semibold text-slate-700 mb-1">Số người thân 1</label>
             <input
               type="tel"
+              inputMode="tel"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               value={formSecrets.backupPhone1}
               onChange={(e) => setFormSecrets({ ...formSecrets, backupPhone1: e.target.value })}
               placeholder="0912345678"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 select-text"
             />
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Số người thân 2 (Tùy chọn)</label>
             <input
               type="tel"
+              inputMode="tel"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               value={formSecrets.backupPhone2}
               onChange={(e) => setFormSecrets({ ...formSecrets, backupPhone2: e.target.value })}
               placeholder="0987654321"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 select-text"
             />
           </div>
         </div>
