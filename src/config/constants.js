@@ -66,6 +66,7 @@ export const STORAGE_KEYS = {
   TRIP: 'trip', // C.5: Lưu bền vào Capacitor Preferences với key "trip"
   QUEUE: 'geofence_message_queue',
   LOGS: 'geofence_activity_logs',
+  SAVED_DESTINATIONS: 'geofence_saved_destinations',
 };
 
 export const MAX_LOG_ENTRIES = 200;

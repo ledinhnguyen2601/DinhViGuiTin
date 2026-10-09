@@ -1,8 +1,3 @@
-/**
- * useTracker Hook for Geofencing Tracker v1.0
- * Connects UI with TripMachine, LocationService, NotifierService and StorageService
- */
-
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { TripMachine } from '../state/tripMachine.js';
 import { LocationService } from '../services/location.js';
@@ -10,6 +5,7 @@ import { NotifierService } from '../services/notifier.js';
 import { StorageService } from '../services/storage.js';
 import { TelegramService } from '../services/telegram.js';
 import { SmsService } from '../services/sms.js';
+import { haversine } from '../services/geo.js';
 import { Device } from '@capacitor/device';
 import { Network } from '@capacitor/network';
 import { TRIP_STATES, DEFAULT_SETTINGS, DEFAULT_SECRETS } from '../config/constants.js';
@@ -17,12 +13,15 @@ import { TRIP_STATES, DEFAULT_SETTINGS, DEFAULT_SECRETS } from '../config/consta
 export function useTracker() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [secrets, setSecrets] = useState(DEFAULT_SECRETS);
+  const [savedDestinations, setSavedDestinations] = useState([]);
   const [tripState, setTripState] = useState(TRIP_STATES.IDLE);
   const [metrics, setMetrics] = useState({
     speedKmh: 0,
     distanceMeters: null,
     etaMinutes: null,
     accuracy: null,
+    lat: null,
+    lng: null,
     lastUpdated: null,
     filterBand: 15,
   });
@@ -36,6 +35,7 @@ export function useTracker() {
   });
 
   const machineRef = useRef(null);
+  const proximityTimerRef = useRef(null);
 
   // Initialize and load persistent state on mount
   useEffect(() => {
@@ -45,8 +45,20 @@ export function useTracker() {
       const storedSettings = await StorageService.getSettings();
       const storedSecrets = await StorageService.getSecrets();
       const storedTrip = await StorageService.getTripState();
+      let storedSaved = await StorageService.getSavedDestinations();
 
       if (!isMounted) return;
+
+      // Seed default saved destination from initial settings if empty
+      if (storedSaved.length === 0 && storedSettings.destinationName) {
+        const seed = await StorageService.addSavedDestination({
+          name: storedSettings.destinationName,
+          lat: storedSettings.destinationLat,
+          lng: storedSettings.destinationLng,
+        });
+        storedSaved = [seed];
+      }
+      setSavedDestinations(storedSaved);
 
       setSettings(storedSettings);
       setSecrets(storedSecrets);
@@ -66,7 +78,12 @@ export function useTracker() {
           if (isMounted) setTripState(newState);
         },
         onMetricsUpdate: (newMetrics) => {
-          if (isMounted) setMetrics(newMetrics);
+          if (isMounted) {
+            setMetrics((prev) => ({
+              ...prev,
+              ...newMetrics,
+            }));
+          }
         },
       });
 
@@ -80,6 +97,24 @@ export function useTracker() {
       }
 
       machineRef.current = machine;
+
+      // Pre-warm GPS immediately on launch so coordinates & distance are ready right away
+      try {
+        LocationService.getCurrentPosition().then((pos) => {
+          if (!isMounted || !pos) return;
+          const dist = haversine(pos.lat, pos.lng, storedSettings.destinationLat, storedSettings.destinationLng);
+          setMetrics((prev) => ({
+            ...prev,
+            accuracy: pos.accuracy,
+            lat: pos.lat,
+            lng: pos.lng,
+            distanceMeters: Math.round(dist),
+            lastUpdated: pos.timestamp || Date.now(),
+          }));
+        }).catch((err) => {
+          console.warn('Initial GPS warm-up skipped:', err?.message);
+        });
+      } catch {}
     }
 
     init();
@@ -118,6 +153,7 @@ export function useTracker() {
       isMounted = false;
       clearInterval(deviceInterval);
       if (networkListener.remove) networkListener.remove();
+      if (proximityTimerRef.current) clearTimeout(proximityTimerRef.current);
       LocationService.stopWatching();
     };
   }, []);
@@ -137,6 +173,10 @@ export function useTracker() {
 
           // If arrived, trigger arrival notification
           if (result.arrived) {
+            if (proximityTimerRef.current) {
+              clearTimeout(proximityTimerRef.current);
+              proximityTimerRef.current = null;
+            }
             await LocationService.stopWatching();
             await NotifierService.notifyArrived({
               settings: currentSettings,
@@ -145,6 +185,32 @@ export function useTracker() {
               arrivalTime: Date.now(),
             });
             await machine.finish();
+            return;
+          }
+
+          // If inside geofence but waiting for 2nd confirmation sample (e.g. stopped at 4m)
+          if (result.insideGeofencePending && !proximityTimerRef.current) {
+            proximityTimerRef.current = setTimeout(async () => {
+              proximityTimerRef.current = null;
+              try {
+                const freshSample = await LocationService.getCurrentPosition();
+                if (machine.state === TRIP_STATES.TRACKING) {
+                  const check = await machine.handleGpsUpdate(freshSample);
+                  if (check.arrived) {
+                    await LocationService.stopWatching();
+                    await NotifierService.notifyArrived({
+                      settings: currentSettings,
+                      secrets: machine.secrets,
+                      tripId: machine.tripId,
+                      arrivalTime: Date.now(),
+                    });
+                    await machine.finish();
+                  }
+                }
+              } catch (e) {
+                console.warn('Proximity recheck failed', e);
+              }
+            }, 5500);
           }
 
           // If distance band changed, adjust distanceFilter
@@ -320,9 +386,76 @@ export function useTracker() {
     return res;
   }, [secrets.backupPhone1, secrets.backupPhone2]);
 
+  /**
+   * Adds a new saved destination bookmark
+   */
+  const addSavedDestination = useCallback(async (dest) => {
+    const created = await StorageService.addSavedDestination(dest);
+    const updated = await StorageService.getSavedDestinations();
+    setSavedDestinations(updated);
+    return created;
+  }, []);
+
+  /**
+   * Removes a saved destination bookmark
+   */
+  const removeSavedDestination = useCallback(async (id) => {
+    const updated = await StorageService.removeSavedDestination(id);
+    setSavedDestinations(updated);
+    return updated;
+  }, []);
+
+  /**
+   * Selects a saved destination as current target
+   */
+  const selectSavedDestination = useCallback(async (dest) => {
+    if (!dest) return;
+    const newSettings = {
+      ...settings,
+      destinationName: dest.name,
+      destinationLat: dest.lat,
+      destinationLng: dest.lng,
+    };
+    await updateSettings(newSettings);
+
+    // Recompute distance to selected destination immediately if GPS fix available
+    const lastPos = LocationService.getLastKnownPosition() || (metrics.lat && metrics.lng ? { lat: metrics.lat, lng: metrics.lng } : null);
+    if (lastPos && lastPos.lat && lastPos.lng) {
+      const dist = haversine(lastPos.lat, lastPos.lng, dest.lat, dest.lng);
+      setMetrics((prev) => ({
+        ...prev,
+        distanceMeters: Math.round(dist),
+      }));
+    }
+    await StorageService.addLog('info', `Đã chuyển điểm đến sang: ${dest.name}`);
+  }, [settings, updateSettings, metrics.lat, metrics.lng]);
+
+  /**
+   * Forces an immediate GPS check and recalculates metrics
+   */
+  const refreshCurrentPosition = useCallback(async () => {
+    try {
+      const pos = await LocationService.getCurrentPosition();
+      const dist = haversine(pos.lat, pos.lng, settings.destinationLat, settings.destinationLng);
+      setMetrics((prev) => ({
+        ...prev,
+        accuracy: pos.accuracy,
+        lat: pos.lat,
+        lng: pos.lng,
+        distanceMeters: Math.round(dist),
+        lastUpdated: pos.timestamp || Date.now(),
+      }));
+      return pos;
+    } catch (e) {
+      console.warn('Refresh position error', e);
+      return null;
+    }
+  }, [settings.destinationLat, settings.destinationLng]);
+
   return {
     settings,
     secrets,
+    savedDestinations,
     tripState,
     metrics,
     gpsError,
@@ -335,6 +468,10 @@ export function useTracker() {
     testTelegramConnection,
     sendTestTelegram,
     sendTestSms,
+    addSavedDestination,
+    removeSavedDestination,
+    selectSavedDestination,
+    refreshCurrentPosition,
     deviceInfo,
   };
 }

@@ -8,8 +8,18 @@ import { StorageService } from './storage.js';
 
 let activeWatchId = null;
 let currentDistanceFilter = 15;
+let currentOnLocation = null;
+let currentOnError = null;
+let currentDestinationName = 'Điểm đến';
+let lastKnownPosition = null;
 
 export const LocationService = {
+  /**
+   * Returns the last cached position if available
+   */
+  getLastKnownPosition() {
+    return lastKnownPosition;
+  },
   /**
    * Checks current geolocation permission status
    */
@@ -54,11 +64,15 @@ export const LocationService = {
           enableHighAccuracy: true,
           timeout: 10000,
         });
-        return {
+        const res = {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
           accuracy: pos.coords.accuracy,
+          speed: pos.coords.speed,
+          timestamp: pos.timestamp || Date.now(),
         };
+        lastKnownPosition = res;
+        return res;
       }
     } catch (e) {
       console.warn('Capacitor getCurrentPosition failed, falling back to browser', e);
@@ -71,11 +85,15 @@ export const LocationService = {
       }
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          resolve({
+          const res = {
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
             accuracy: pos.coords.accuracy,
-          });
+            speed: pos.coords.speed,
+            timestamp: pos.timestamp || Date.now(),
+          };
+          lastKnownPosition = res;
+          resolve(res);
         },
         (err) => reject(err),
         { enableHighAccuracy: true, timeout: 10000 }
@@ -89,6 +107,22 @@ export const LocationService = {
   async startWatching({ distanceFilter = 15, destinationName = 'Điểm đến' }, onLocation, onError) {
     await this.stopWatching();
     currentDistanceFilter = distanceFilter;
+    if (onLocation) currentOnLocation = onLocation;
+    if (onError) currentOnError = onError;
+    if (destinationName) currentDestinationName = destinationName;
+
+    const safeOnLocation = (sample) => {
+      lastKnownPosition = sample;
+      if (typeof currentOnLocation === 'function') {
+        currentOnLocation(sample);
+      }
+    };
+
+    const safeOnError = (err) => {
+      if (typeof currentOnError === 'function') {
+        currentOnError(err);
+      }
+    };
 
     // Check if running natively in Android
     if (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform()) {
@@ -99,18 +133,18 @@ export const LocationService = {
           activeWatchId = await plugins.BackgroundGeolocation.addWatcher(
             {
               backgroundTitle: 'Đang theo dõi hành trình',
-              backgroundMessage: `Sẽ báo cho người thân khi bạn đến ${destinationName}`,
+              backgroundMessage: `Sẽ báo cho người thân khi bạn đến ${currentDestinationName}`,
               requestPermissions: true,
               stale: false,
-              distanceFilter,
+              distanceFilter: currentDistanceFilter,
             },
             (location, error) => {
               if (error) {
-                onError && onError(error);
+                safeOnError(error);
                 return;
               }
               if (location) {
-                onLocation({
+                safeOnLocation({
                   lat: location.latitude,
                   lng: location.longitude,
                   accuracy: location.accuracy,
@@ -128,11 +162,11 @@ export const LocationService = {
           { enableHighAccuracy: true, timeout: 15000 },
           (pos, err) => {
             if (err) {
-              onError && onError(err);
+              safeOnError(err);
               return;
             }
             if (pos) {
-              onLocation({
+              safeOnLocation({
                 lat: pos.coords.latitude,
                 lng: pos.coords.longitude,
                 accuracy: pos.coords.accuracy,
@@ -152,7 +186,7 @@ export const LocationService = {
     if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
       activeWatchId = navigator.geolocation.watchPosition(
         (pos) => {
-          onLocation({
+          safeOnLocation({
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
             accuracy: pos.coords.accuracy,
@@ -160,7 +194,7 @@ export const LocationService = {
             timestamp: pos.timestamp || Date.now(),
           });
         },
-        (err) => onError && onError(err),
+        (err) => safeOnError(err),
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 3000 }
       );
       return activeWatchId;
@@ -170,15 +204,19 @@ export const LocationService = {
   },
 
   /**
-   * Updates distanceFilter dynamically
+   * Updates distanceFilter dynamically without losing callbacks
    */
-  async updateDistanceFilter(newFilter, destinationName = 'Điểm đến', onLocation, onError) {
+  async updateDistanceFilter(newFilter, destinationName = currentDestinationName, onLocation, onError) {
+    if (onLocation) currentOnLocation = onLocation;
+    if (onError) currentOnError = onError;
+    if (destinationName) currentDestinationName = destinationName;
+
     if (newFilter === currentDistanceFilter) return;
     currentDistanceFilter = newFilter;
     await StorageService.addLog('info', `Cập nhật tần suất định vị: distanceFilter = ${newFilter}m`);
-    // Recreate watcher with updated filter if needed
+    // Recreate watcher with updated filter using persistent callbacks
     if (activeWatchId) {
-      await this.startWatching({ distanceFilter: newFilter, destinationName }, onLocation, onError);
+      await this.startWatching({ distanceFilter: newFilter, destinationName: currentDestinationName }, currentOnLocation, currentOnError);
     }
   },
 

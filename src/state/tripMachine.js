@@ -62,6 +62,17 @@ export class TripMachine {
    */
   restoreFrom(data) {
     if (!data) return;
+
+    // Auto-reset stale trips if finished or timed out more than 2 hours ago
+    const now = Date.now();
+    if (data.state && [TRIP_STATES.DONE, TRIP_STATES.TIMEOUT, TRIP_STATES.STOPPED].includes(data.state)) {
+      const lastTime = data.lastGpsTimestamp || data.startedAt || 0;
+      if (now - lastTime > 2 * 3600 * 1000) {
+        this.reset();
+        return;
+      }
+    }
+
     this.state = data.state || TRIP_STATES.IDLE;
     this.tripId = data.tripId || null;
     this.startedAt = data.startedAt || null;
@@ -93,6 +104,8 @@ export class TripMachine {
       distanceMeters: this.currentDistanceMeters,
       etaMinutes: this.currentEtaMinutes,
       accuracy: this.lastSample?.accuracy ?? null,
+      lat: this.lastSample?.lat ?? null,
+      lng: this.lastSample?.lng ?? null,
       lastUpdated: this.lastGpsTimestamp,
       filterBand: this.currentFilterBand,
     });
@@ -236,6 +249,8 @@ export class TripMachine {
       }
     }
 
+    const insideGeofencePending = !this.arrivedNotified && distMeters <= (this.settings.radiusMeters || DEFAULT_RADIUS);
+
     await this.persist();
     this.emitMetricsUpdate();
 
@@ -243,6 +258,7 @@ export class TripMachine {
       arrived,
       filterChanged,
       newFilter: recommendedFilter,
+      insideGeofencePending,
     };
   }
 

@@ -15,6 +15,8 @@ import {
   Clock,
   Sparkles,
   Loader2,
+  BookmarkPlus,
+  Star,
   Link as LinkIcon
 } from 'lucide-react';
 import { CapacitorHttp } from '@capacitor/core';
@@ -23,6 +25,7 @@ import { StorageService } from '../services/storage.js';
 import { TelegramService } from '../services/telegram.js';
 import { ConfirmModal } from '../components/ConfirmModal.jsx';
 import { MapPicker } from '../components/MapPicker.jsx';
+import { SmartInput } from '../components/SmartInput.jsx';
 import { DEFAULT_RADIUS } from '../config/constants.js';
 import { testDiscordWebhook, validateDiscordWebhookUrl } from '../services/discord.js';
 import { reverseGeocode } from '../services/geo.js';
@@ -39,11 +42,15 @@ export function Settings({ tracker }) {
   const {
     settings,
     secrets,
+    savedDestinations = [],
     updateSettings,
     updateSecrets,
     testTelegramConnection,
     sendTestTelegram,
     sendTestSms,
+    addSavedDestination,
+    removeSavedDestination,
+    selectSavedDestination,
   } = tracker;
 
   const [formSettings, setFormSettings] = useState({ ...settings });
@@ -313,18 +320,32 @@ export function Settings({ tracker }) {
         <MapPicker
           initialLat={formSettings.destinationLat}
           initialLng={formSettings.destinationLng}
-          onSelect={async (lat, lng) => {
+          initialName={formSettings.destinationName}
+          savedDestinations={savedDestinations}
+          onSelect={async (lat, lng, name) => {
             const roundedLat = Number(lat.toFixed(6));
             const roundedLng = Number(lng.toFixed(6));
             setShowMapPicker(false);
-            const placeName = await reverseGeocode(roundedLat, roundedLng);
             setFormSettings((prev) => ({
               ...prev,
               destinationLat: roundedLat,
               destinationLng: roundedLng,
-              destinationName: placeName || prev.destinationName,
+              destinationName: name || prev.destinationName,
             }));
-            showNotification('success', placeName ? `Đã chọn: ${placeName}` : `Đã chọn tọa độ: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+            showNotification('success', `Đã chọn: ${name || `${roundedLat}, ${roundedLng}`}`);
+          }}
+          onSaveBookmarkAndSelect={async (name, lat, lng) => {
+            const roundedLat = Number(lat.toFixed(6));
+            const roundedLng = Number(lng.toFixed(6));
+            setShowMapPicker(false);
+            await addSavedDestination({ name, lat: roundedLat, lng: roundedLng });
+            setFormSettings((prev) => ({
+              ...prev,
+              destinationLat: roundedLat,
+              destinationLng: roundedLng,
+              destinationName: name,
+            }));
+            showNotification('success', `Đã lưu & chọn điểm: ${name}`);
           }}
           onClose={() => setShowMapPicker(false)}
         />
@@ -373,17 +394,12 @@ export function Settings({ tracker }) {
           <label className="block text-xs font-semibold text-slate-700 mb-1">
             Tên người đi (xuất hiện trong tin nhắn & nhận diện lệnh bot)
           </label>
-          <input
-            type="text"
-            inputMode="text"
-            autoComplete="off"
-            autoCorrect="off"
-            spellCheck={false}
-            maxLength={30}
+          <SmartInput
             value={formSettings.travelerName ?? ''}
-            onChange={(e) => setFormSettings({ ...formSettings, travelerName: e.target.value })}
+            onChange={(val) => setFormSettings({ ...formSettings, travelerName: val })}
             placeholder="VD: Đình Nguyên"
-            className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-900 select-text"
+            maxLength={30}
+            className="px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-900 bg-white"
           />
         </div>
 
@@ -391,17 +407,12 @@ export function Settings({ tracker }) {
           <label className="block text-xs font-semibold text-slate-700 mb-1">
             Tên điểm đến (tự điền từ Map hoặc gõ tay tùy ý)
           </label>
-          <input
-            type="text"
-            inputMode="text"
-            autoComplete="off"
-            autoCorrect="off"
-            spellCheck={false}
-            maxLength={50}
+          <SmartInput
             value={formSettings.destinationName ?? ''}
-            onChange={(e) => setFormSettings({ ...formSettings, destinationName: e.target.value })}
+            onChange={(val) => setFormSettings({ ...formSettings, destinationName: val })}
             placeholder="VD: Nhà, Quê ngoại, Ký túc xá"
-            className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-900 select-text"
+            maxLength={50}
+            className="px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-900 bg-white"
           />
         </div>
 
@@ -422,21 +433,18 @@ export function Settings({ tracker }) {
             Dán link Google Maps (để lấy tọa độ tự động)
           </label>
           <div className="flex space-x-2">
-            <input
+            <SmartInput
               type="url"
               inputMode="url"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
               value={pastedLink}
-              onChange={(e) => setPastedLink(e.target.value)}
+              onChange={setPastedLink}
               placeholder="VD: https://maps.app.goo.gl/..."
-              className="flex-1 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 text-xs text-slate-900 select-text"
+              className="flex-1 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 text-xs text-slate-900 bg-white"
             />
             <button
               onClick={handleParseMapLink}
               disabled={!pastedLink || isParsingLink}
-              className="px-3 py-2 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 text-xs font-bold disabled:opacity-50 transition flex items-center"
+              className="px-3 py-2 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 text-xs font-bold disabled:opacity-50 transition flex items-center flex-shrink-0"
             >
               {isParsingLink ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Lấy tọa độ'}
             </button>
@@ -492,20 +500,88 @@ export function Settings({ tracker }) {
           </div>
         </div>
 
-        {/* Nút lưu nhanh riêng cho phần Điểm đến & Người đi */}
-        <div className="pt-1">
+        {/* Nút lưu nhanh và lưu vào danh sách yêu thích */}
+        <div className="grid grid-cols-2 gap-2 pt-1">
           <button
             type="button"
             onClick={async () => {
               await updateSettings(formSettings);
               showNotification('success', 'Đã lưu tên người đi và điểm đến!');
             }}
-            className="w-full py-2.5 px-3 rounded-xl bg-brand-50 hover:bg-brand-100 active:scale-98 text-brand-700 text-xs font-bold flex items-center justify-center space-x-1.5 transition cursor-pointer border border-brand-200"
+            className="py-2.5 px-2 rounded-xl bg-brand-50 hover:bg-brand-100 active:scale-98 text-brand-700 text-xs font-bold flex items-center justify-center space-x-1.5 transition cursor-pointer border border-brand-200"
           >
             <CheckCircle2 className="w-4 h-4 text-brand-600" />
-            <span>Lưu Tên & Điểm Đến Này</span>
+            <span>Lưu cấu hình này</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={async () => {
+              await addSavedDestination({
+                name: formSettings.destinationName || 'Điểm yêu thích',
+                lat: formSettings.destinationLat,
+                lng: formSettings.destinationLng,
+              });
+              showNotification('success', `Đã thêm "${formSettings.destinationName || 'Điểm yêu thích'}" vào danh sách!`);
+            }}
+            className="py-2.5 px-2 rounded-xl bg-sky-50 hover:bg-sky-100 active:scale-98 text-sky-700 text-xs font-bold flex items-center justify-center space-x-1.5 transition cursor-pointer border border-sky-200"
+          >
+            <BookmarkPlus className="w-4 h-4 text-sky-600" />
+            <span>Lưu vào yêu thích</span>
           </button>
         </div>
+
+        {/* Quản lý danh sách điểm yêu thích đã lưu */}
+        {savedDestinations.length > 0 && (
+          <div className="pt-2 border-t border-slate-100 space-y-2">
+            <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center justify-between">
+              <span>Danh sách điểm đã lưu ({savedDestinations.length})</span>
+            </div>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {savedDestinations.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200/80 text-xs"
+                >
+                  <div className="min-w-0 flex-1 pr-2">
+                    <div className="font-bold text-slate-800 truncate">{d.name}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      {d.lat.toFixed(4)}, {d.lng.toFixed(4)}
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormSettings((prev) => ({
+                          ...prev,
+                          destinationName: d.name,
+                          destinationLat: d.lat,
+                          destinationLng: d.lng,
+                        }));
+                        showNotification('success', `Đã áp dụng điểm: ${d.name}`);
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-brand-50 text-brand-600 border border-slate-200 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                    >
+                      Chọn
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await removeSavedDestination(d.id);
+                        showNotification('info', `Đã xóa điểm: ${d.name}`);
+                      }}
+                      className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                      title="Xóa điểm"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* 3. Primary Channel: Telegram or Discord Webhook */}
@@ -534,19 +610,16 @@ export function Settings({ tracker }) {
               </button>
             </div>
             <div className="flex space-x-2">
-              <input
+              <SmartInput
                 type={showDiscordUrl ? 'text' : 'password'}
                 inputMode="url"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
                 value={formSecrets.discordWebhookUrl || ''}
-                onChange={(e) => {
-                  setFormSecrets({ ...formSecrets, discordWebhookUrl: e.target.value });
+                onChange={(val) => {
+                  setFormSecrets({ ...formSecrets, discordWebhookUrl: val });
                   setDiscordTestResult(null);
                 }}
                 placeholder="https://discord.com/api/webhooks/..."
-                className={`flex-1 px-3 py-2 rounded-xl border font-mono text-xs text-slate-900 focus:outline-none focus:ring-2 select-text ${
+                className={`flex-1 px-3 py-2 rounded-xl border font-mono text-xs text-slate-900 focus:outline-none focus:ring-2 bg-white ${
                   isDiscordUrlInvalid
                     ? 'border-rose-300 focus:ring-rose-500 bg-rose-50/30'
                     : 'border-slate-200 focus:ring-brand-500'
@@ -556,7 +629,7 @@ export function Settings({ tracker }) {
                 type="button"
                 onClick={handleTestDiscord}
                 disabled={!isDiscordUrlValid || isTestingDiscord}
-                className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-[#5865F2] text-xs font-semibold flex items-center space-x-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+                className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-[#5865F2] text-xs font-semibold flex items-center space-x-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap flex-shrink-0"
               >
                 {isTestingDiscord ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -601,21 +674,18 @@ export function Settings({ tracker }) {
               <label className="text-xs font-semibold text-slate-700">Bot Token (từ @BotFather)</label>
               <button
                 onClick={() => setShowToken(!showToken)}
-                className="text-slate-400 hover:text-slate-600 text-xs flex items-center space-x-1"
+                className="text-slate-400 hover:text-slate-600 text-xs flex items-center space-x-1 cursor-pointer"
               >
                 {showToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 <span className="text-[11px]">{showToken ? 'Ẩn' : 'Hiện'}</span>
               </button>
             </div>
-            <input
+            <SmartInput
               type={showToken ? 'text' : 'password'}
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
               value={formSecrets.telegramBotToken}
-              onChange={(e) => setFormSecrets({ ...formSecrets, telegramBotToken: e.target.value })}
+              onChange={(val) => setFormSecrets({ ...formSecrets, telegramBotToken: val })}
               placeholder="123456789:AAFlkjw9384jsdfk..."
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 select-text"
+              className="px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 bg-white"
             />
           </div>
 
@@ -625,22 +695,17 @@ export function Settings({ tracker }) {
               <button
                 onClick={handleFetchChatId}
                 disabled={isFetchingChatId}
-                className="text-brand-600 hover:text-brand-700 text-[11px] font-semibold flex items-center space-x-1"
+                className="text-brand-600 hover:text-brand-700 text-[11px] font-semibold flex items-center space-x-1 cursor-pointer"
               >
                 {isFetchingChatId && <Loader2 className="w-3 h-3 animate-spin mr-1" />}
                 <span>Tự lấy Chat ID</span>
               </button>
             </div>
-            <input
-              type="text"
-              inputMode="text"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
+            <SmartInput
               value={formSecrets.telegramChatId}
-              onChange={(e) => setFormSecrets({ ...formSecrets, telegramChatId: e.target.value })}
+              onChange={(val) => setFormSecrets({ ...formSecrets, telegramChatId: val })}
               placeholder="-100123456789"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 select-text"
+              className="px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 bg-white"
             />
           </div>
 
@@ -680,30 +745,24 @@ export function Settings({ tracker }) {
         <div className="grid grid-cols-2 gap-2.5">
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Số người thân 1</label>
-            <input
+            <SmartInput
               type="tel"
               inputMode="tel"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
               value={formSecrets.backupPhone1}
-              onChange={(e) => setFormSecrets({ ...formSecrets, backupPhone1: e.target.value })}
+              onChange={(val) => setFormSecrets({ ...formSecrets, backupPhone1: val })}
               placeholder="0912345678"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 select-text"
+              className="px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 bg-white"
             />
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Số người thân 2 (Tùy chọn)</label>
-            <input
+            <SmartInput
               type="tel"
               inputMode="tel"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
               value={formSecrets.backupPhone2}
-              onChange={(e) => setFormSecrets({ ...formSecrets, backupPhone2: e.target.value })}
+              onChange={(val) => setFormSecrets({ ...formSecrets, backupPhone2: val })}
               placeholder="0987654321"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 select-text"
+              className="px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs text-slate-900 bg-white"
             />
           </div>
         </div>

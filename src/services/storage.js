@@ -280,6 +280,73 @@ export const StorageService = {
     await safeStorage.remove(STORAGE_KEYS.LOGS);
   },
 
+  /**
+   * Retrieves user saved destinations (bookmarks)
+   */
+  async getSavedDestinations() {
+    try {
+      const data = await safeStorage.get(STORAGE_KEYS.SAVED_DESTINATIONS);
+      if (!data) return [];
+      const list = JSON.parse(data);
+      if (!Array.isArray(list)) return [];
+      return list.filter(item => item && typeof item.lat === 'number' && typeof item.lng === 'number');
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Saves destinations list
+   */
+  async saveSavedDestinations(destinations) {
+    const valid = Array.isArray(destinations)
+      ? destinations.filter(d => d && typeof d.lat === 'number' && typeof d.lng === 'number').map(d => ({
+          id: d.id || `dest_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          name: typeof d.name === 'string' ? d.name.trim().slice(0, 50) : 'Điểm đã lưu',
+          lat: Number(Number(d.lat).toFixed(6)),
+          lng: Number(Number(d.lng).toFixed(6)),
+          address: typeof d.address === 'string' ? d.address.trim().slice(0, 100) : '',
+          createdAt: d.createdAt || Date.now(),
+        }))
+      : [];
+    await safeStorage.set(STORAGE_KEYS.SAVED_DESTINATIONS, JSON.stringify(valid));
+    return valid;
+  },
+
+  /**
+   * Adds a new saved destination
+   */
+  async addSavedDestination(destination) {
+    const list = await this.getSavedDestinations();
+    const newEntry = {
+      id: destination.id || `dest_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: typeof destination.name === 'string' && destination.name.trim() ? destination.name.trim().slice(0, 50) : 'Điểm mới',
+      lat: Number(Number(destination.lat).toFixed(6)),
+      lng: Number(Number(destination.lng).toFixed(6)),
+      address: typeof destination.address === 'string' ? destination.address.trim().slice(0, 100) : '',
+      createdAt: Date.now(),
+    };
+    // If a point with identical or very close coordinates already exists, update name instead of duplicating
+    const existingIndex = list.findIndex(d => Math.abs(d.lat - newEntry.lat) < 0.0001 && Math.abs(d.lng - newEntry.lng) < 0.0001);
+    if (existingIndex >= 0) {
+      list[existingIndex] = { ...list[existingIndex], name: newEntry.name, address: newEntry.address || list[existingIndex].address };
+    } else {
+      list.unshift(newEntry);
+    }
+    await this.saveSavedDestinations(list);
+    return newEntry;
+  },
+
+  /**
+   * Deletes a saved destination by ID
+   */
+  async removeSavedDestination(id) {
+    const list = await this.getSavedDestinations();
+    const filtered = list.filter(d => d.id !== id);
+    await this.saveSavedDestinations(filtered);
+    return filtered;
+  },
+
   async clearAll() {
     await safeStorage.clear();
   }

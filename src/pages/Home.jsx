@@ -3,7 +3,23 @@ import { StatusCard } from '../components/StatusCard.jsx';
 import { MetricBoxes } from '../components/MetricBox.jsx';
 import { BigButton } from '../components/BigButton.jsx';
 import { ConfirmModal } from '../components/ConfirmModal.jsx';
-import { MapPin, Send, MessageSquare, AlertCircle, Signal, CheckCircle2, ChevronRight, Battery, BatteryCharging, Wifi, WifiOff } from 'lucide-react';
+import { SavedDestinationsBar } from '../components/SavedDestinationsBar.jsx';
+import { MapPicker } from '../components/MapPicker.jsx';
+import {
+  MapPin,
+  Send,
+  MessageSquare,
+  AlertCircle,
+  Signal,
+  CheckCircle2,
+  ChevronRight,
+  Battery,
+  BatteryCharging,
+  Wifi,
+  WifiOff,
+  Compass,
+  RotateCw,
+} from 'lucide-react';
 import { TRIP_STATES } from '../config/constants.js';
 import { formatTime } from '../services/geo.js';
 
@@ -15,13 +31,11 @@ function DiscordIcon({ className = 'w-4 h-4' }) {
   );
 }
 
-export function Home({
-  tracker,
-  setActiveTab,
-}) {
+export function Home({ tracker, setActiveTab }) {
   const {
     settings,
     secrets,
+    savedDestinations = [],
     tripState,
     metrics,
     gpsError,
@@ -29,10 +43,15 @@ export function Home({
     startTrip,
     stopTrip,
     resetTrip,
+    selectSavedDestination,
+    addSavedDestination,
+    refreshCurrentPosition,
     deviceInfo,
   } = tracker;
 
   const [showStopModal, setShowStopModal] = useState(false);
+  const [showMapPickerFromHome, setShowMapPickerFromHome] = useState(false);
+  const [isRefreshingGps, setIsRefreshingGps] = useState(false);
 
   // Check if GPS hasn't updated in > 5 minutes
   const isGpsStale = metrics.lastUpdated && Date.now() - metrics.lastUpdated > 5 * 60 * 1000;
@@ -50,61 +69,103 @@ export function Home({
     stopTrip();
   };
 
+  const handleOpenGoogleNavigation = (e) => {
+    e.stopPropagation();
+    if (!settings.destinationLat || !settings.destinationLng) {
+      setActiveTab('settings');
+      return;
+    }
+    const lat = settings.destinationLat;
+    const lng = settings.destinationLng;
+    // Launch Google Maps Turn-by-Turn navigation
+    const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+    window.open(navUrl, '_system');
+  };
+
+  const handleRefreshGps = async () => {
+    setIsRefreshingGps(true);
+    await refreshCurrentPosition();
+    setTimeout(() => setIsRefreshingGps(false), 800);
+  };
+
   return (
     <div className="space-y-4 pb-24 animate-fade-in">
       <StatusCard state={tripState} />
 
+      {/* 1. Horizontal Saved Destinations Bar (Vuốt ngang chọn điểm đến tức thì) */}
+      <SavedDestinationsBar
+        destinations={savedDestinations}
+        currentLat={settings.destinationLat}
+        currentLng={settings.destinationLng}
+        currentName={settings.destinationName}
+        userLocation={metrics.lat && metrics.lng ? { lat: metrics.lat, lng: metrics.lng } : null}
+        onSelectDestination={selectSavedDestination}
+        onOpenAddMap={() => setShowMapPickerFromHome(true)}
+      />
+
       {/* Device Info (Battery & Network) */}
       <div className="flex items-center justify-between px-2 text-xs font-semibold text-slate-500">
-         <div className="flex items-center space-x-1.5">
-            {deviceInfo.isConnected ? (
-               <Wifi className="w-4 h-4 text-emerald-500" />
-            ) : (
-               <WifiOff className="w-4 h-4 text-rose-500" />
-            )}
-            <span>
-               {deviceInfo.isConnected 
-                  ? (deviceInfo.networkType === 'wifi' ? 'Wi-Fi' : deviceInfo.networkType === 'cellular' ? '4G/LTE' : 'Mạng OK')
-                  : 'Mất mạng'
-               }
-            </span>
-         </div>
-         <div className="flex items-center space-x-1.5">
-            {deviceInfo.isCharging ? (
-               <BatteryCharging className="w-4 h-4 text-amber-500" />
-            ) : (
-               <Battery className="w-4 h-4 text-emerald-500" />
-            )}
-            <span>
-               {deviceInfo.battery !== null ? `${deviceInfo.battery}%` : '--'}
-            </span>
-         </div>
+        <div className="flex items-center space-x-1.5">
+          {deviceInfo.isConnected ? (
+            <Wifi className="w-4 h-4 text-emerald-500" />
+          ) : (
+            <WifiOff className="w-4 h-4 text-rose-500" />
+          )}
+          <span>
+            {deviceInfo.isConnected
+              ? deviceInfo.networkType === 'wifi'
+                ? 'Wi-Fi'
+                : deviceInfo.networkType === 'cellular'
+                ? '4G/LTE'
+                : 'Mạng OK'
+              : 'Mất mạng'}
+          </span>
+        </div>
+        <div className="flex items-center space-x-1.5">
+          {deviceInfo.isCharging ? (
+            <BatteryCharging className="w-4 h-4 text-amber-500" />
+          ) : (
+            <Battery className="w-4 h-4 text-emerald-500" />
+          )}
+          <span>{deviceInfo.battery !== null ? `${deviceInfo.battery}%` : '--'}</span>
+        </div>
       </div>
 
-      {/* 2. Destination Banner */}
+      {/* 2. Destination Banner with Direct Google Navigation Button */}
       <div
         onClick={() => setActiveTab('settings')}
         className="bg-white border border-slate-200/90 rounded-2xl p-3.5 flex items-center justify-between shadow-sm cursor-pointer hover:border-brand-300 transition"
       >
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-3 flex-1 min-w-0 pr-2">
           <div className="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center text-brand-600 flex-shrink-0">
             <MapPin className="w-5 h-5" />
           </div>
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center space-x-1">
               <span>Người đi:</span>
-              <span className="text-brand-600 font-bold">{settings.travelerName || 'Chưa đặt'}</span>
+              <span className="text-brand-600 font-bold truncate">{settings.travelerName || 'Chưa đặt'}</span>
             </div>
-            <div className="text-base font-bold text-slate-900 leading-snug">
+            <div className="text-base font-bold text-slate-900 leading-snug truncate">
               Đến: {settings.destinationName || 'Chưa đặt'}
             </div>
             <div className="text-xs text-slate-500">
-              Bán kính báo tin: <span className="font-semibold text-slate-700">{settings.radiusMeters || 100} m</span>
+              Bán kính: <span className="font-semibold text-slate-700">{settings.radiusMeters || 100} m</span>
             </div>
           </div>
         </div>
-        <div className="flex items-center text-slate-400">
-          <ChevronRight className="w-5 h-5" />
+
+        {/* Nút Chỉ đường trực tiếp qua Google Maps */}
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={handleOpenGoogleNavigation}
+            className="flex items-center space-x-1.5 px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 active:scale-95 transition"
+            title="Mở chỉ đường trên Google Maps"
+          >
+            <Compass className="w-4 h-4" />
+            <span className="whitespace-nowrap">Chỉ đường</span>
+          </button>
+          <ChevronRight className="w-5 h-5 text-slate-400" />
         </div>
       </div>
 
@@ -115,13 +176,27 @@ export function Home({
         etaMinutes={metrics.etaMinutes}
       />
 
-      {/* 4. GPS Accuracy & Status Line */}
+      {/* 4. GPS Accuracy & Status Line with Quick Refresh button */}
       <div className="bg-white border border-slate-200/90 rounded-2xl px-4 py-3 flex items-center justify-between shadow-sm text-xs">
         <div className="flex items-center space-x-2">
-          <Signal className={`w-4 h-4 ${metrics.accuracy && metrics.accuracy <= 50 ? 'text-emerald-500' : 'text-amber-500'}`} />
+          <Signal
+            className={`w-4 h-4 ${
+              metrics.accuracy && metrics.accuracy <= 50 ? 'text-emerald-500' : 'text-amber-500'
+            }`}
+          />
           <span className="text-slate-600">
-            Độ chính xác GPS: <span className="font-bold text-slate-900">{metrics.accuracy ? `±${Math.round(metrics.accuracy)}m` : 'Đang chờ...'}</span>
+            Độ chính xác GPS:{' '}
+            <span className="font-bold text-slate-900">
+              {metrics.accuracy ? `±${Math.round(metrics.accuracy)}m` : 'Đang lấy...'}
+            </span>
           </span>
+          <button
+            onClick={handleRefreshGps}
+            className="p-1 text-slate-400 hover:text-brand-600 rounded-lg hover:bg-slate-100 transition active:scale-95"
+            title="Làm mới tọa độ GPS"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${isRefreshingGps ? 'animate-spin text-brand-600' : ''}`} />
+          </button>
         </div>
         <div className="text-slate-500 text-[11px]">
           {metrics.lastUpdated ? `Cập nhật: ${formatTime(metrics.lastUpdated)}` : 'Chưa có mẫu'}
@@ -163,7 +238,7 @@ export function Home({
 
         {isDiscordMode ? (
           <div className="flex flex-col gap-2 text-xs">
-            {/* Dòng 1: icon Discord + "Discord Webhook" + trạng thái (Đã đặt / Chưa đặt) */}
+            {/* Discord Status */}
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <DiscordIcon className="w-4 h-4 text-[#5865F2]" />
@@ -180,7 +255,7 @@ export function Home({
               </span>
             </div>
 
-            {/* Dòng 2: icon SMS + "SMS SIM" + trạng thái */}
+            {/* SMS Status */}
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <MessageSquare className="w-4 h-4 text-indigo-500" />
@@ -238,7 +313,25 @@ export function Home({
         )}
       </div>
 
-
+      {/* Map Picker Modal triggered from Home */}
+      {showMapPickerFromHome && (
+        <MapPicker
+          initialLat={settings.destinationLat}
+          initialLng={settings.destinationLng}
+          initialName={settings.destinationName}
+          savedDestinations={savedDestinations}
+          onSelect={(lat, lng, name) => {
+            setShowMapPickerFromHome(false);
+            selectSavedDestination({ name, lat, lng });
+          }}
+          onSaveBookmarkAndSelect={async (name, lat, lng) => {
+            setShowMapPickerFromHome(false);
+            const saved = await addSavedDestination({ name, lat, lng });
+            selectSavedDestination(saved);
+          }}
+          onClose={() => setShowMapPickerFromHome(false)}
+        />
+      )}
 
       {/* Stop confirmation modal */}
       <ConfirmModal

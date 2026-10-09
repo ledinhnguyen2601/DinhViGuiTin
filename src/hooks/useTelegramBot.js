@@ -99,17 +99,25 @@ export function useTelegramBot(tracker) {
     if (!replyChatId) return;
 
     try {
-      // Get fresh location if possible, otherwise use last known
-      let pos;
-      try {
-         pos = await LocationService.getCurrentPosition();
-      } catch(e) {
-         // Fallback to metrics if GPS fails right now
-         if (metrics.lastUpdated) {
-             pos = { lat: metrics.lat, lng: metrics.lng, accuracy: metrics.accuracy };
-         } else {
-             throw new Error('Không thể lấy vị trí hiện tại.');
-         }
+      // 1. Get fresh location or instant cached fix
+      let pos = null;
+      const lastKnown = LocationService.getLastKnownPosition();
+
+      // If last known position is fresh (< 2 mins), use it immediately for lightning response
+      if (lastKnown && typeof lastKnown.lat === 'number' && typeof lastKnown.lng === 'number' && (Date.now() - (lastKnown.timestamp || 0) < 120000)) {
+        pos = lastKnown;
+      } else {
+        try {
+          pos = await LocationService.getCurrentPosition();
+        } catch (e) {
+          if (lastKnown && typeof lastKnown.lat === 'number' && typeof lastKnown.lng === 'number') {
+            pos = lastKnown;
+          } else if (metrics && typeof metrics.lat === 'number' && typeof metrics.lng === 'number') {
+            pos = { lat: metrics.lat, lng: metrics.lng, accuracy: metrics.accuracy };
+          } else {
+            throw new Error('Chưa lấy được tín hiệu vệ tinh GPS. Vui lòng bật định vị máy.');
+          }
+        }
       }
 
       // Get Battery & Network Info
