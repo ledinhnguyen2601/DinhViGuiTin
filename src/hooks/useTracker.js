@@ -8,6 +8,7 @@ import { SmsService } from '../services/sms.js';
 import { haversine } from '../services/geo.js';
 import { Device } from '@capacitor/device';
 import { Network } from '@capacitor/network';
+import { App } from '@capacitor/app';
 import { TRIP_STATES, DEFAULT_SETTINGS, DEFAULT_SECRETS } from '../config/constants.js';
 
 export function useTracker() {
@@ -119,39 +120,116 @@ export function useTracker() {
 
     init();
 
+    // Tự động cập nhật GPS khi app resume / mở lại màn hình
+    const handleAppActive = () => {
+      if (isMounted) {
+        LocationService.getCurrentPosition()
+          .then((pos) => {
+            if (!isMounted || !pos) return;
+            const currentSettings = machineRef.current?.settings || settings;
+            const dist = haversine(
+              pos.lat,
+              pos.lng,
+              currentSettings.destinationLat,
+              currentSettings.destinationLng
+            );
+            setMetrics((prev) => ({
+              ...prev,
+              accuracy: pos.accuracy,
+              lat: pos.lat,
+              lng: pos.lng,
+              distanceMeters: Math.round(dist),
+              lastUpdated: pos.timestamp || Date.now(),
+            }));
+            setGpsError(null);
+          })
+          .catch(() => {});
+      }
+    };
+
+    let appResumeHandle = null;
+    App.addListener('appStateChange', (state) => {
+      if (state.isActive && isMounted) {
+        handleAppActive();
+      }
+    })
+      .then((h) => {
+        appResumeHandle = h;
+      })
+      .catch(() => {});
+
+    const onVisChange = () => {
+      if (document.visibilityState === 'visible' && isMounted) {
+        handleAppActive();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+
+    // Quét định kỳ vị trí nhẹ nhàng (mỗi 12s) khi app mở ở màn hình chính (IDLE)
+    // Giúp tọa độ và khoảng cách luôn luôn tươi mới mà không cần ấn nút tròn tải lại
+    const foregroundGpsInterval = setInterval(() => {
+      if (!isMounted) return;
+      if (!machineRef.current || machineRef.current.state === TRIP_STATES.IDLE) {
+        LocationService.getCurrentPosition()
+          .then((pos) => {
+            if (!isMounted || !pos) return;
+            const currentSettings = machineRef.current?.settings || settings;
+            const dist = haversine(
+              pos.lat,
+              pos.lng,
+              currentSettings.destinationLat,
+              currentSettings.destinationLng
+            );
+            setMetrics((prev) => ({
+              ...prev,
+              accuracy: pos.accuracy,
+              lat: pos.lat,
+              lng: pos.lng,
+              distanceMeters: Math.round(dist),
+              lastUpdated: pos.timestamp || Date.now(),
+            }));
+            setGpsError(null);
+          })
+          .catch(() => {});
+      }
+    }, 12000);
+
     // Track Device Info (Battery & Network)
     let deviceInterval;
     const updateDeviceInfo = async () => {
       try {
         const [bat, net] = await Promise.all([
           Device.getBatteryInfo().catch(() => ({})),
-          Network.getStatus().catch(() => ({}))
+          Network.getStatus().catch(() => ({})),
         ]);
         if (!isMounted) return;
         setDeviceInfo({
           battery: bat.batteryLevel !== undefined ? Math.round(bat.batteryLevel * 100) : null,
           isCharging: bat.isCharging || false,
           networkType: net.connectionType || 'unknown',
-          isConnected: net.connected ?? true
+          isConnected: net.connected ?? true,
         });
       } catch (e) {}
     };
-    
+
     updateDeviceInfo();
     deviceInterval = setInterval(updateDeviceInfo, 10000); // Update every 10s
 
     const networkListener = Network.addListener('networkStatusChange', (status) => {
       if (!isMounted) return;
-      setDeviceInfo(prev => ({
+      setDeviceInfo((prev) => ({
         ...prev,
         networkType: status.connectionType,
-        isConnected: status.connected
+        isConnected: status.connected,
       }));
     });
 
     return () => {
       isMounted = false;
       clearInterval(deviceInterval);
+      clearInterval(foregroundGpsInterval);
+      if (appResumeHandle?.remove) appResumeHandle.remove();
+      document.removeEventListener('visibilitychange', onVisChange);
       if (networkListener.remove) networkListener.remove();
       if (proximityTimerRef.current) clearTimeout(proximityTimerRef.current);
       LocationService.stopWatching();

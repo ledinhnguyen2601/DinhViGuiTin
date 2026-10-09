@@ -12,6 +12,11 @@ const DEFAULT_TIMEOUT_MS = 10000; // 10s timeout
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
+
+  if (options.signal) {
+    options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
   try {
     const response = await fetch(url, {
       ...options,
@@ -212,7 +217,7 @@ export const TelegramService = {
   /**
    * Fetches updates for reverse query polling
    */
-  async getUpdates(botToken, offset = null, timeout = 30) {
+  async getUpdates(botToken, offset = null, timeout = 5, signal = null) {
     const cleanToken = (botToken || '').trim();
     if (!cleanToken) return { ok: false, error: 'Chưa nhập Bot Token' };
 
@@ -221,8 +226,8 @@ export const TelegramService = {
       if (offset) {
         url += `&offset=${offset}`;
       }
-      // Use longer timeout for long polling
-      const res = await fetchWithTimeout(url, { method: 'GET' }, (timeout + 5) * 1000);
+      // Use short 5s long polling with (timeout + 3)s fetch abort window
+      const res = await fetchWithTimeout(url, { method: 'GET', signal }, (timeout + 3) * 1000);
       const json = await res.json().catch(() => null);
 
       if (res.ok && json?.ok) {
